@@ -1,0 +1,71 @@
+@startuml
+title Library Project - Class Diagram
+
+package "library" {
+	class Book {
+		- isbn: String
+		- title: String
+		- author: String
+		- borrowed: boolean
+		- borrowedByStudentId: String
+		- borrowedDate: LocalDate
+		- dueDate: LocalDate
+		+ Book(isbn: String, title: String, author: String)
+		+ isOverDue(today: LocalDate): boolean
+		+ getIsbn(): String
+		+ getTitle(): String
+		+ getAuthor(): String
+		+ isBorrowed(): boolean
+		+ getBorrowedByStudentId(): String
+		+ getBorrowedDate(): LocalDate
+		+ getDueDate(): LocalDate
+		+ setTitle(title: String): void
+		+ setAuthor(author: String): void
+	}
+
+	class Student {
+		- studentId: String
+		- name: String
+		- maxBorrowLimit: int
+		- borrowedBooks: List<Book>
+		+ Student(studentId: String, name: String)
+		+ getBorrowedBooks(): List<Book>
+		+ hasBorrowed(isbn: String): boolean
+		+ hasOverdueBooks(today: LocalDate): boolean
+		+ getStudentId(): String
+		+ getName(): String
+		+ setName(name: String): void
+		+ getMaxBorrowLimit(): int
+		+ setMaxBorrowLimit(limit: int): void
+	}
+
+	class Librarian {
+		- employeeId: String
+		- name: String
+		- catalogue: Map<String, Book>
+		+ Librarian(employeeId: String, name: String)
+		+ addBook(book: Book): void
+		+ removeBook(isbn: String): void
+		+ getBook(isbn: String): Book
+		+ borrowBook(student: Student, isbn: String, borrowDays: int): void
+		+ returnBook(student: Student, isbn: String): void
+		+ listOverdueBooks(): List<Book>
+		+ listAllBooks(): Collection<Book>
+		+ getEmployeeId(): String
+		+ getName(): String
+		+ setName(name: String): void
+	}
+}
+
+Student "1" -- "*" Book : borrows >
+Librarian "1" --> "*" Book : manages
+Librarian "1" --> "*" Student : serves
+
+note right of Librarian
+	Borrow/Return flow:
+	- Validate student + book
+	- Update Book state
+	- Update Student list
+end note
+
+@enduml

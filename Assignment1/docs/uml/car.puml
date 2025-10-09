@@ -1,0 +1,120 @@
+@startuml
+title Car Project - Class Diagram
+
+package "car" {
+	interface Car {
+		+ getVin(): String
+		+ getBrand(): String
+		+ getModel(): String
+		+ getYear(): int
+		+ getDisplayName(): String
+	}
+
+	package "car.vendor" {
+		class VendorCar implements Car {
+			- vin: String
+			- brand: String
+			- model: String
+			- year: int
+			- productionDate: LocalDate
+			- warrantyYears: int
+			- recalled: boolean
+			- recallNotes: String
+			- softwareVersion: String
+			+ VendorCar(vin: String, brand: String, model: String, year: int, productionDate: LocalDate, warrantyYears: int)
+			+ startRecall(notes: String): void
+			+ endRecall(): void
+			+ isUnderWarranty(onDate: LocalDate): boolean
+			+ updateSoftware(newVersion: String): void
+		}
+	}
+
+	package "car.owner" {
+		class OwnerCar implements Car {
+			- vin: String
+			- brand: String
+			- model: String
+			- year: int
+			- plateNumber: String
+			- ownerId: String
+			- ownerName: String
+			- odometerKm: long
+			- maintenanceRecords: List<MaintenanceRecord>
+			- insuranceCompany: String
+			- insuranceExpireDate: LocalDate
+			+ OwnerCar(vin: String, brand: String, model: String, year: int, plateNumber: String, ownerId: String, ownerName: String)
+			+ drive(km: long): void
+			+ addMaintenance(record: MaintenanceRecord): void
+			+ insure(company: String, expireDate: LocalDate): void
+			+ isInsured(onDate: LocalDate): boolean
+			+ transferOwnership(newOwnerId: String, newOwnerName: String): void
+		}
+
+		class MaintenanceRecord <<record>> {
+			+ date: LocalDate
+			+ item: String
+			+ cost: double
+			+ notes: String
+		}
+	}
+
+	package "car.manager" {
+		class ManagerCar implements Car {
+			- vin: String
+			- brand: String
+			- model: String
+			- year: int
+			- registrationId: String
+			- plateNumber: String
+			- status: RegistrationStatus
+			- inspectionExpireDate: LocalDate
+			- violations: List<Violation>
+			+ ManagerCar(vin: String, brand: String, model: String, year: int)
+			+ register(registrationId: String, plateNumber: String, inspectionExpireDate: LocalDate): void
+			+ suspend(): void
+			+ reinstate(): void
+			+ addViolation(code: String, points: int, fine: double, date: LocalDate): void
+			+ calculateTotalFine(): double
+			+ calculateTotalPoints(): int
+			+ isInspectionValid(onDate: LocalDate): boolean
+		}
+
+		enum RegistrationStatus {
+			UNREGISTERED
+			ACTIVE
+			SUSPENDED
+		}
+
+		class Violation <<record>> {
+			+ code: String
+			+ points: int
+			+ fine: double
+			+ date: LocalDate
+		}
+	}
+}
+
+Car <|.. VendorCar
+Car <|.. OwnerCar
+Car <|.. ManagerCar
+
+OwnerCar "1" o-- "*" MaintenanceRecord : keeps
+ManagerCar "1" o-- "*" Violation : has
+ManagerCar --> RegistrationStatus
+
+note right of VendorCar
+	Manufacturer perspective:
+	warranty, recall, software
+end note
+
+note right of OwnerCar
+	Owner perspective:
+	ownership, usage, maintenance, insurance
+end note
+
+note right of ManagerCar
+	Authority perspective:
+	registration, inspection, violations
+end note
+
+@enduml
