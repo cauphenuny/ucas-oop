@@ -1,3 +1,6 @@
 [submodule "Project/DiffSynth-Studio"]
 	path = Project/DiffSynth-Studio
 	url = https://github.com/modelscope/DiffSynth-Studio/
+[submodule "Project/VideoX-Fun"]
+	path = Project/VideoX-Fun
+	url = https://github.com/aigc-apps/VideoX-Fun
