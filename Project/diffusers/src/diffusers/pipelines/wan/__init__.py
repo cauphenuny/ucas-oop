@@ -22,6 +22,14 @@ except OptionalDependencyNotAvailable:
 
     _dummy_objects.update(get_objects_from_module(dummy_torch_and_transformers_objects))
 else:
+    _import_structure["camera_utils"] = [
+        "Camera",
+        "custom_meshgrid",
+        "get_relative_pose",
+        "ray_condition",
+        "process_camera_txt",
+        "process_camera_params",
+    ]
     _import_structure["pipeline_wan"] = ["WanPipeline"]
     _import_structure["pipeline_wan_animate"] = ["WanAnimatePipeline"]
     _import_structure["pipeline_wan_i2v"] = ["WanImageToVideoPipeline"]
@@ -35,6 +43,14 @@ if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
     except OptionalDependencyNotAvailable:
         from ...utils.dummy_torch_and_transformers_objects import *
     else:
+        from .camera_utils import (
+            Camera,
+            custom_meshgrid,
+            get_relative_pose,
+            process_camera_params,
+            process_camera_txt,
+            ray_condition,
+        )
         from .pipeline_wan import WanPipeline
         from .pipeline_wan_animate import WanAnimatePipeline
         from .pipeline_wan_i2v import WanImageToVideoPipeline
