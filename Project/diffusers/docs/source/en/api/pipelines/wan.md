@@ -237,6 +237,71 @@ export_to_video(output, "output.mp4", fps=16)
 </hfoption>
 </hfoptions>
 
+### Camera Control for Video Generation
+
+Wan video generation pipelines support camera control through trajectory files, enabling precise control over camera movements like zoom, pan, and rotation. This feature is compatible with VideoX-Fun and CameraCtrl txt format.
+
+#### Camera Trajectory Format
+
+Camera trajectories are specified in txt files with the following format:
+- First line: header (ignored)
+- Subsequent lines: `frame_id fx fy cx cy _ _ r11 r12 r13 t1 r21 r22 r23 t2 r31 r32 r33 t3`
+
+Where:
+- `fx, fy, cx, cy`: Camera intrinsic parameters (focal lengths and principal point)
+- `r11-r33, t1-t3`: 3x4 world-to-camera transformation matrix [R|t]
+
+#### Using Camera Control
+
+```python
+from diffusers.pipelines.wan import process_camera_txt
+
+# Load and process camera trajectory
+camera_embeddings = process_camera_txt(
+    txt_path="path/to/camera_trajectory.txt",
+    width=672,
+    height=384,
+    num_frames=81,  # Optional: clip or extend to target frame count
+    fix_frame_id=True,  # Fixes VideoX-Fun issue where frame_id is always 0
+)
+
+# camera_embeddings shape: [num_frames, height, width, 6]
+# The 6 channels represent Plücker ray coordinates for camera control
+```
+
+#### Available Sample Trajectories
+
+The following sample camera trajectories are provided in `examples/community/wan_camera_samples/`:
+- `Zoom_In.txt` / `Zoom_Out.txt`: Forward/backward camera movement
+- `Pan_Left.txt` / `Pan_Right.txt`: Horizontal camera panning
+- `Pan_Up.txt` / `Pan_Down.txt`: Vertical camera panning
+- `Pan_Left_Up.txt`, `Pan_Left_Down.txt`, `Pan_Right_Up.txt`, `Pan_Right_Down.txt`: Diagonal movements
+- `CW.txt` / `ACW.txt`: Clockwise/anti-clockwise camera rotation
+
+#### Example Usage
+
+```python
+import sys
+from pathlib import Path
+
+# Run the example script
+# cd examples/community
+# python wan_camera_control_example.py --camera_txt wan_camera_samples/Zoom_In.txt --width 672 --height 384
+
+from diffusers.pipelines.wan import process_camera_txt
+
+# Process camera trajectory
+embeddings = process_camera_txt(
+    "wan_camera_samples/Zoom_In.txt",
+    width=672,
+    height=384,
+    fix_frame_id=True,  # Fix frame_id to be sequential (0, 1, 2, ...)
+)
+
+print(f"Camera embeddings shape: {embeddings.shape}")
+# Output: Camera embeddings shape: torch.Size([81, 384, 672, 6])
+```
+
 ### Any-to-Video Controllable Generation
 
 Wan VACE supports various generation techniques which achieve controllable video generation. Some of the capabilities include:
