@@ -14,4 +14,17 @@ dependencies = [
 diffusers = { path = "diffusers", editable = true }
 
 [tool.basedpyright]
-typeCheckingMode = "standard"
+typeCheckingMode = "basic"
+include = [
+    "diffusers/src",
+    "diffusers/tests",
+]
+exclude = [
+    "**/.venv",
+    "**/build",
+    "**/dist",
+    "docs",
+    "examples",
+]
+strict = []
+reportMissingImports = "warning"
