@@ -5,10 +5,13 @@ description = "project for extending diffusers"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "diffusers",
+    "diffusers[dev]",
     "scipy>=1.16.3",
     "torch>=2.9.1",
 ]
 
 [tool.uv.sources]
 diffusers = { path = "diffusers", editable = true }
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
