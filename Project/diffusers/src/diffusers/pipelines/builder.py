@@ -55,19 +55,19 @@ class DiffusionPipelineBuilder:
     
     Example:
         ```python
-        # 从预训练模型构建
+        # Build from pretrained model
         builder = DiffusionPipelineBuilder.from_pretrained(
             "runwayml/stable-diffusion-v1-5",
             torch_dtype=torch.float16
         )
         
-        # 替换单个组件
+        # Replace individual component
         builder.with_scheduler(custom_scheduler)
         
-        # 构建管道
+        # Build pipeline
         pipeline = builder.build()
         
-        # 或者导出组件用于训练
+        # Or export components for training
         components = builder.build(export_modules=True)
         ```
     """
@@ -79,12 +79,12 @@ class DiffusionPipelineBuilder:
         device: Optional[Union[str, torch.device]] = None,
     ):
         """
-        初始化建造者
+        Initialize the builder.
         
         Args:
-            base_repo: 可选的基础仓库路径或名称
-            torch_dtype: 默认的数据类型
-            device: 默认的设备
+            base_repo: Optional base repository path or name
+            torch_dtype: Default data type
+            device: Default device
         """
         self.base_repo = base_repo
         self.torch_dtype = torch_dtype
@@ -100,7 +100,7 @@ class DiffusionPipelineBuilder:
         self._register_default_presets()
     
     def _register_default_presets(self):
-        """注册默认预设配置"""
+        """Register default preset configurations."""
         # 可以在这里添加常用的预设配置
         pass
     
@@ -111,43 +111,43 @@ class DiffusionPipelineBuilder:
         **kwargs
     ) -> "DiffusionPipelineBuilder":
         """
-        从预训练模型创建建造者并加载所有组件
+        Create builder from pretrained model and load all components
         
         Args:
-            pretrained_model_name_or_path: 预训练模型的路径或Hub ID
-            **kwargs: 传递给 DiffusionPipeline.from_pretrained 的其他参数
-                     支持 torch_dtype, device_map, variant, revision 等
+            pretrained_model_name_or_path: Path to pretrained model or Hub ID
+            **kwargs: Additional arguments passed to DiffusionPipeline.from_pretrained
+                     Supports torch_dtype, device_map, variant, revision, etc.
         
         Returns:
-            配置好的建造者实例
+            Configured builder instance
         """
-        # 提取建造者参数
+        # Extract builder parameters
         torch_dtype = kwargs.get("torch_dtype", None)
         device = kwargs.get("device", None)
         
-        # 创建建造者实例
+        # Create builder instance
         builder = cls(
             base_repo=pretrained_model_name_or_path,
             torch_dtype=torch_dtype,
             device=device,
         )
         
-        # 加载完整的管道以获取所有组件
-        # 这里我们使用 DiffusionPipeline.from_pretrained 来加载
+        # Load complete pipeline to get all components
+        # Use DiffusionPipeline.from_pretrained to load
         try:
             pipeline = DiffusionPipeline.from_pretrained(
                 pretrained_model_name_or_path,
                 **kwargs
             )
             
-            # 提取所有组件
+            # Extract all components
             expected_modules, optional_kwargs = DiffusionPipeline._get_signature_keys(pipeline)
             for name in expected_modules:
                 component = getattr(pipeline, name, None)
                 if component is not None:
                     builder.components[name] = component
             
-            # 保存配置
+            # Save config
             if hasattr(pipeline, "config"):
                 for key, value in pipeline.config.items():
                     if key not in ["_class_name", "_diffusers_version", "_module", "_name_or_path"]:
@@ -155,11 +155,11 @@ class DiffusionPipelineBuilder:
                         
         except Exception as e:
             logger.warning(
-                f"无法从 {pretrained_model_name_or_path} 加载完整管道: {e}. "
-                "将尝试单独加载组件。"
+                f"Unable to load complete pipeline from {pretrained_model_name_or_path}: {e}. "
+                "Will try to load components individually."
             )
-            # 如果加载失败，可以尝试单独加载各个组件
-            # 这里为简化暂不实现
+            # If loading fails, can try loading individual components
+            # Not implemented for simplicity
         
         return builder
     
@@ -173,17 +173,17 @@ class DiffusionPipelineBuilder:
         **flags
     ) -> "DiffusionPipelineBuilder":
         """
-        设置或替换指定名称的组件（通用方法）
+        Set or replace the component with the specified name (generic method)
         
         Args:
-            name: 组件名称 (如 'unet', 'vae', 'scheduler' 等)
-            component: 组件对象
-            freeze: 是否冻结组件参数
-            requires_grad: 是否需要梯度
-            **flags: 其他标志
+            name: Component name (e.g. 'unet', 'vae', 'scheduler' 等)
+            component: Component object
+            freeze: Whether to freeze component parameters
+            requires_grad: Whether to require gradients
+            **flags: Other flags
         
         Returns:
-            self，支持链式调用
+            self，Supports method chaining
         """
         # Basic type checking
         if component is not None:
@@ -196,14 +196,14 @@ class DiffusionPipelineBuilder:
         
         self.components[name] = component
         
-        # 保存标志
+        # Save flags
         self.component_flags[name] = {
             "freeze": freeze,
             "requires_grad": requires_grad,
             **flags
         }
         
-        # 应用freeze和requires_grad
+        # Apply freeze and requires_grad
         if component is not None and isinstance(component, torch.nn.Module):
             if freeze:
                 component.requires_grad_(False)
@@ -217,7 +217,7 @@ class DiffusionPipelineBuilder:
         unet: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置UNet组件"""
+        """Set UNet component."""
         return self.with_component("unet", unet, **flags)
     
     def with_vae(
@@ -225,7 +225,7 @@ class DiffusionPipelineBuilder:
         vae: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置VAE组件"""
+        """Set VAE component."""
         return self.with_component("vae", vae, **flags)
     
     def with_scheduler(
@@ -233,7 +233,7 @@ class DiffusionPipelineBuilder:
         scheduler: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置调度器组件"""
+        """Set scheduler component."""
         return self.with_component("scheduler", scheduler, **flags)
     
     def with_text_encoder(
@@ -241,7 +241,7 @@ class DiffusionPipelineBuilder:
         text_encoder: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置文本编码器组件"""
+        """Set text encoder component."""
         return self.with_component("text_encoder", text_encoder, **flags)
     
     def with_tokenizer(
@@ -249,7 +249,7 @@ class DiffusionPipelineBuilder:
         tokenizer: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置分词器组件"""
+        """Set tokenizer component."""
         return self.with_component("tokenizer", tokenizer, **flags)
     
     def with_feature_extractor(
@@ -257,7 +257,7 @@ class DiffusionPipelineBuilder:
         feature_extractor: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置特征提取器组件"""
+        """Set feature extractor component."""
         return self.with_component("feature_extractor", feature_extractor, **flags)
     
     def with_safety_checker(
@@ -265,7 +265,7 @@ class DiffusionPipelineBuilder:
         safety_checker: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置安全检查器组件"""
+        """Set safety checker component."""
         return self.with_component("safety_checker", safety_checker, **flags)
     
     def with_image_encoder(
@@ -273,7 +273,7 @@ class DiffusionPipelineBuilder:
         image_encoder: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置图像编码器组件"""
+        """Set image encoder component."""
         return self.with_component("image_encoder", image_encoder, **flags)
     
     def with_controlnet(
@@ -281,7 +281,7 @@ class DiffusionPipelineBuilder:
         controlnet: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置ControlNet组件"""
+        """Set ControlNet component."""
         return self.with_component("controlnet", controlnet, **flags)
     
     def with_adapter(
@@ -289,7 +289,7 @@ class DiffusionPipelineBuilder:
         adapter: Any,
         **flags
     ) -> "DiffusionPipelineBuilder":
-        """设置适配器组件"""
+        """Set adapter component."""
         return self.with_component("adapter", adapter, **flags)
     
     def apply_preset(
@@ -298,19 +298,19 @@ class DiffusionPipelineBuilder:
         **kwargs
     ) -> "DiffusionPipelineBuilder":
         """
-        应用预设配置
+        Apply preset configuration
         
         Args:
-            name: 预设名称
-            **kwargs: 传递给预设函数的额外参数
+            name: Preset name
+            **kwargs: Additional parameters passed to preset function
         
         Returns:
-            self，支持链式调用
+            self，Supports method chaining
         """
         if name not in self.presets:
             raise ValueError(
-                f"未知的预设名称: {name}. "
-                f"可用的预设: {list(self.presets.keys())}"
+                f"未知的Preset name: {name}. "
+                f"Available presets: {list(self.presets.keys())}"
             )
         
         preset_func = self.presets[name]
@@ -323,13 +323,13 @@ class DiffusionPipelineBuilder:
         **kwargs
     ) -> "DiffusionPipelineBuilder":
         """
-        设置管道级别的配置覆盖
+        Set pipeline-level configuration overrides
         
         Args:
-            **kwargs: 配置参数
+            **kwargs: Configuration parameters
         
         Returns:
-            self，支持链式调用
+            self，Supports method chaining
         """
         self.config_overrides.update(kwargs)
         return self
@@ -339,14 +339,14 @@ class DiffusionPipelineBuilder:
         validator: Callable[["DiffusionPipelineBuilder"], None]
     ) -> "DiffusionPipelineBuilder":
         """
-        注册自定义验证器
+        Register custom validator
         
         Args:
-            validator: 验证函数，接收builder作为参数，
-                      如果验证失败应抛出 PipelineValidationError
+            validator: Validator function that receives builder as parameter,
+                      should raise PipelineValidationError if validation fails
         
         Returns:
-            self，支持链式调用
+            self，Supports method chaining
         """
         self.validators.append(validator)
         return self
@@ -357,19 +357,19 @@ class DiffusionPipelineBuilder:
         hook: Callable
     ) -> "DiffusionPipelineBuilder":
         """
-        添加钩子函数
+        Add hook function
         
         Args:
-            stage: 钩子阶段 ("pre_build" 或 "post_build")
-            hook: 钩子函数
+            stage: Hook stage ("pre_build" 或 "post_build")
+            hook: Hook function
         
         Returns:
-            self，支持链式调用
+            self，Supports method chaining
         """
         if stage not in self.hooks:
             raise ValueError(
-                f"无效的钩子阶段: {stage}. "
-                f"可用的阶段: {list(self.hooks.keys())}"
+                f"无效的Hook stage: {stage}. "
+                f"Available stages: {list(self.hooks.keys())}"
             )
         
         self.hooks[stage].append(hook)
@@ -377,10 +377,10 @@ class DiffusionPipelineBuilder:
     
     def validate(self) -> None:
         """
-        执行所有验证器
+        Execute all validators
         
         Raises:
-            PipelineValidationError: 如果验证失败
+            PipelineValidationError: If validation fails
         """
         for validator in self.validators:
             validator(self)
@@ -393,31 +393,31 @@ class DiffusionPipelineBuilder:
         lazy: bool = False
     ) -> Union[DiffusionPipeline, Dict[str, Any], tuple]:
         """
-        构建管道
+        Build pipeline
         
         Args:
-            pipeline_cls: 管道类，默认为 DiffusionPipeline
-            export_modules: 如果为True，返回组件字典而不是管道实例
-            lazy: 如果为True，返回 (pipeline_cls, components) 元组供延迟构建
+            pipeline_cls: Pipeline class, defaults to DiffusionPipeline
+            export_modules: If True, return component dictionary instead of pipeline instance
+            lazy: If True, return (pipeline_cls, components) tuple for lazy construction
         
         Returns:
-            根据参数返回管道实例、组件字典或延迟构建元组
+            Return pipeline instance, component dictionary, or lazy build tuple based on parameters
         
         Raises:
-            PipelineValidationError: 如果验证失败
+            PipelineValidationError: If validation fails
         """
-        # 执行 pre_build 钩子
+        # Execute pre_build hooks
         for hook in self.hooks["pre_build"]:
             hook(self)
         
-        # 执行验证
+        # Execute validation
         self.validate()
         
-        # 如果只是导出模块
+        # If only exporting modules
         if export_modules:
             return self.components.copy()
         
-        # 如果是延迟构建
+        # If lazy build
         if lazy:
             return (pipeline_cls, self.components.copy())
         
@@ -435,15 +435,15 @@ class DiffusionPipelineBuilder:
             else:
                 optional_params.append(param_name)
         
-        # 检查缺失的必需组件
+        # Check missing required components
         missing_required = [p for p in required_params if p not in self.components]
         if missing_required:
             raise PipelineValidationError(
-                f"缺失必需的组件: {missing_required}. "
-                f"请使用 with_{missing_required[0]}() 等方法设置这些组件。"
+                f"Missing required components: {missing_required}. "
+                f"Please use with_{missing_required[0]}() and similar methods to set these components."
             )
         
-        # 构建管道
+        # Build pipeline
         try:
             # Prepare constructor arguments
             init_kwargs = {}
@@ -454,27 +454,27 @@ class DiffusionPipelineBuilder:
                 if param_name in self.components:
                     init_kwargs[param_name] = self.components[param_name]
             
-            # 创建管道实例
+            # Create pipeline instance
             pipeline = pipeline_cls(**init_kwargs)
             
-            # 应用配置覆盖
+            # Apply configuration overrides
             if hasattr(pipeline, "register_to_config") and self.config_overrides:
                 pipeline.register_to_config(**self.config_overrides)
             
-            # 移动到指定设备和数据类型
+            # Move to specified device and dtype
             if self.device is not None or self.torch_dtype is not None:
                 device = self.device
                 dtype = self.torch_dtype
                 
-                # 如果只指定了dtype但没有指定device，使用当前设备
+                # If only dtype specified without device, use current device
                 if dtype is not None and device is None:
                     device = pipeline.device
                 
-                # 移动管道
+                # Move pipeline
                 if device is not None or dtype is not None:
                     pipeline.to(device=device, dtype=dtype)
             
-            # 执行 post_build 钩子
+            # Execute post_build hooks
             for hook in self.hooks["post_build"]:
                 hook(pipeline)
             
@@ -482,27 +482,27 @@ class DiffusionPipelineBuilder:
             
         except Exception as e:
             raise PipelineValidationError(
-                f"构建管道时出错: {e}"
+                f"Build pipeline时出错: {e}"
             ) from e
     
     def clone(self, **overrides) -> "DiffusionPipelineBuilder":
         """
-        克隆当前建造者并可选地覆盖某些组件
+        Clone current builder with optional component overrides
         
         Args:
-            **overrides: 要覆盖的组件，格式为 component_name=component
+            **overrides: Components to override, format: component_name=component
         
         Returns:
-            新的建造者实例
+            New builder instance
         """
-        # 创建新实例
+        # Create new instance
         new_builder = DiffusionPipelineBuilder(
             base_repo=self.base_repo,
             torch_dtype=self.torch_dtype,
             device=self.device,
         )
         
-        # 复制组件和配置
+        # Copy components and config
         new_builder.components = copy.copy(self.components)
         new_builder.config_overrides = copy.copy(self.config_overrides)
         new_builder.component_flags = copy.deepcopy(self.component_flags)
@@ -510,7 +510,7 @@ class DiffusionPipelineBuilder:
         new_builder.hooks = {k: v.copy() for k, v in self.hooks.items()}
         new_builder.presets = self.presets.copy()
         
-        # 应用覆盖
+        # Apply overrides
         for name, component in overrides.items():
             new_builder.with_component(name, component)
         
