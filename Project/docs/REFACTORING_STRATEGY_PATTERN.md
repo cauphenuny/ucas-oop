@@ -186,9 +186,10 @@ image = pipeline(prompt)
 - Hybrid approach (functions + strategies) is acceptable
 
 ### 3. Performance
-- No performance overhead from abstraction
-- Strategy instantiation is lightweight
-- Same underlying implementations
+- **Zero performance overhead**: Cached instances avoid repeated object creation
+- **Factory caching**: `AttentionStrategyFactory` caches strategy instances
+- **Module-level instances**: Pre-instantiated strategies for hot paths
+- Same underlying implementations as before
 
 ## Future Enhancements
 
