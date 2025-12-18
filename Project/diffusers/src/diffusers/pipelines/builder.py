@@ -13,11 +13,11 @@
 # limitations under the License.
 
 """
-DiffusionPipelineBuilder - 建造者模式实现用于构建扩散管道
+DiffusionPipelineBuilder - Builder pattern implementation for constructing diffusion pipelines.
 
-这个模块提供了一个建造者模式的实现，用于灵活地构建各种扩散管道（Diffusion Pipeline）。
-它允许用户通过链式调用来配置和构建管道组件，支持从预训练模型加载、单独替换组件、
-以及应用预设配置等功能。
+This module provides a builder pattern implementation for flexibly constructing various diffusion pipelines.
+It allows users to configure and build pipeline components through method chaining, supports loading from
+pretrained models, replacing individual components, and applying preset configurations.
 """
 
 import copy
@@ -38,22 +38,22 @@ logger = logging.get_logger(__name__)
 
 
 class PipelineValidationError(Exception):
-    """管道验证错误异常类"""
+    """Exception raised when pipeline validation fails."""
     pass
 
 
 class DiffusionPipelineBuilder:
     """
-    DiffusionPipeline 的建造者类
+    Builder class for DiffusionPipeline.
     
-    这个类实现了建造者模式，用于灵活构建扩散管道。支持：
-    - 从预训练模型批量加载组件
-    - 通过链式调用单独设置或替换组件
-    - 应用预设配置
-    - 自定义验证规则
-    - 灵活的钩子系统
+    This class implements the builder pattern for flexibly constructing diffusion pipelines. It supports:
+    - Batch loading components from pretrained models
+    - Setting or replacing individual components through method chaining
+    - Applying preset configurations
+    - Custom validation rules
+    - Flexible hook system
     
-    示例:
+    Example:
         ```python
         # 从预训练模型构建
         builder = DiffusionPipelineBuilder.from_pretrained(
@@ -185,18 +185,13 @@ class DiffusionPipelineBuilder:
         Returns:
             self，支持链式调用
         """
-        # 基本类型检查
+        # Basic type checking
         if component is not None:
-            if isinstance(component, torch.nn.Module):
-                if not isinstance(component, (ModelMixin, torch.nn.Module)):
-                    logger.warning(
-                        f"组件 {name} 不是 ModelMixin 或 torch.nn.Module 的实例，"
-                        "可能无法正常工作。"
-                    )
-            elif name == "scheduler" and not isinstance(component, SchedulerMixin):
+            # Check scheduler type
+            if name == "scheduler" and not isinstance(component, SchedulerMixin):
                 logger.warning(
-                    f"调度器组件应该是 SchedulerMixin 的实例，"
-                    f"但得到了 {type(component)}"
+                    f"Scheduler component should be an instance of SchedulerMixin, "
+                    f"but got {type(component)}"
                 )
         
         self.components[name] = component
@@ -426,13 +421,14 @@ class DiffusionPipelineBuilder:
         if lazy:
             return (pipeline_cls, self.components.copy())
         
-        # 检查必需的组件（基于pipeline_cls的__init__签名）
+        # Check required components based on pipeline_cls __init__ signature
         init_signature = inspect.signature(pipeline_cls.__init__)
         required_params = []
         optional_params = []
         
         for param_name, param in init_signature.parameters.items():
-            if param_name in ["self", "kwargs"]:
+            # Skip 'self' and variable argument parameters
+            if param_name == "self" or param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                 continue
             if param.default == inspect.Parameter.empty:
                 required_params.append(param_name)
@@ -449,9 +445,12 @@ class DiffusionPipelineBuilder:
         
         # 构建管道
         try:
-            # 准备构造参数
+            # Prepare constructor arguments
             init_kwargs = {}
-            for param_name in list(init_signature.parameters.keys())[1:]:  # 跳过self
+            for param_name, param in init_signature.parameters.items():
+                # Skip 'self' and variable argument parameters
+                if param_name == "self" or param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    continue
                 if param_name in self.components:
                     init_kwargs[param_name] = self.components[param_name]
             
