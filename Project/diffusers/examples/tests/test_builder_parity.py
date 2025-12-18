@@ -47,36 +47,38 @@ def compare_pipelines(pipeline1, pipeline2, component_names):
         是否相同
     """
     differences = []
-    
+
     for name in component_names:
         comp1 = getattr(pipeline1, name, None)
         comp2 = getattr(pipeline2, name, None)
-        
+
         # 检查是否都存在或都不存在
         if (comp1 is None) != (comp2 is None):
             differences.append(f"组件 {name}: 一个为 None，另一个不是")
             continue
-        
+
         # 如果都为 None，跳过
         if comp1 is None and comp2 is None:
             continue
-        
+
+        assert comp1 is not None and comp2 is not None
+
         # 检查类型
         if type(comp1) != type(comp2):
             differences.append(
                 f"组件 {name}: 类型不同 - {type(comp1).__name__} vs {type(comp2).__name__}"
             )
             continue
-        
+
         # 对于 torch.nn.Module，检查是否是同一个对象或有相同的状态
         if isinstance(comp1, torch.nn.Module):
             # 检查配置（如果有）
             if hasattr(comp1, "config") and hasattr(comp2, "config"):
                 if comp1.config != comp2.config:
                     differences.append(f"组件 {name}: 配置不同")
-        
+
         print(f"✓ 组件 {name}: 类型匹配 ({type(comp1).__name__})")
-    
+
     return differences
 
 

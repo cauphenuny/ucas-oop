@@ -24,7 +24,7 @@ import copy
 import inspect
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, overload, Literal
 
 import torch
 
@@ -74,7 +74,7 @@ class DiffusionPipelineBuilder:
     
     def __init__(
         self,
-        base_repo: Optional[Union[str, Path]] = None,
+        base_repo: Optional[Union[str, os.PathLike]] = None,
         torch_dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -384,6 +384,36 @@ class DiffusionPipelineBuilder:
         """
         for validator in self.validators:
             validator(self)
+    
+    @overload
+    def build(
+        self,
+        pipeline_cls: type = DiffusionPipeline,
+        *,
+        export_modules: Literal[True] = True,
+        lazy: bool = False
+    ) -> DiffusionPipeline:
+        ...
+    
+    @overload
+    def build(
+        self,
+        pipeline_cls: type = DiffusionPipeline,
+        *,
+        export_modules: Literal[False] = False,
+        lazy: bool = False
+    ) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def build(
+        self,
+        pipeline_cls: type = DiffusionPipeline,
+        *,
+        export_modules: bool = False,
+        lazy: Literal[True] = True,
+    ) -> tuple:
+        ...
     
     def build(
         self,

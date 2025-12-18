@@ -16,15 +16,13 @@ diffusers = { path = "diffusers", editable = true }
 [tool.basedpyright]
 typeCheckingMode = "basic"
 include = [
-    "diffusers/src",
-    "diffusers/tests",
+    "diffusers/",
 ]
 exclude = [
     "**/.venv",
     "**/build",
     "**/dist",
     "docs",
-    "examples",
 ]
 strict = []
 reportMissingImports = "warning"
