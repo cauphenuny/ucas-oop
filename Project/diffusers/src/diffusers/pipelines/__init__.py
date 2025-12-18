@@ -53,6 +53,10 @@ else:
     _import_structure["ddpm"] = ["DDPMPipeline"]
     _import_structure["dit"] = ["DiTPipeline"]
     _import_structure["latent_diffusion"].extend(["LDMSuperResolutionPipeline"])
+    _import_structure["builder"] = [
+        "DiffusionPipelineBuilder",
+        "PipelineValidationError",
+    ]
     _import_structure["pipeline_utils"] = [
         "AudioPipelineOutput",
         "DiffusionPipeline",
@@ -536,6 +540,7 @@ if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
             AutoPipelineForInpainting,
             AutoPipelineForText2Image,
         )
+        from .builder import DiffusionPipelineBuilder, PipelineValidationError
         from .consistency_models import ConsistencyModelPipeline
         from .dance_diffusion import DanceDiffusionPipeline
         from .ddim import DDIMPipeline
