@@ -1499,32 +1499,42 @@ class AttentionStrategyFactory:
     
     This factory manages the creation of strategy objects based on backend names,
     providing a centralized place for strategy instantiation and registration.
+    Strategy instances are cached to avoid repeated instantiation overhead.
     """
     
     _strategies: Dict[AttentionBackendName, type] = {}
+    _instances: Dict[AttentionBackendName, AttentionStrategy] = {}  # Instance cache
     
     @classmethod
     def register_strategy(cls, backend_name: AttentionBackendName, strategy_class: type) -> None:
         """Register a strategy class for a given backend name."""
         cls._strategies[backend_name] = strategy_class
+        # Clear cached instance when re-registering
+        if backend_name in cls._instances:
+            del cls._instances[backend_name]
     
     @classmethod
     def create_strategy(cls, backend_name: AttentionBackendName) -> AttentionStrategy:
         """
-        Create a strategy instance for the given backend.
+        Create or retrieve a cached strategy instance for the given backend.
         
         Args:
             backend_name: The attention backend to create a strategy for
             
         Returns:
-            An instance of the appropriate AttentionStrategy subclass
+            A cached instance of the appropriate AttentionStrategy subclass
             
         Raises:
             ValueError: If the backend is not registered
         """
         if backend_name not in cls._strategies:
             raise ValueError(f"No strategy registered for backend: {backend_name}")
-        return cls._strategies[backend_name]()
+        
+        # Return cached instance if available
+        if backend_name not in cls._instances:
+            cls._instances[backend_name] = cls._strategies[backend_name]()
+        
+        return cls._instances[backend_name]
 
 
 # ===== Concrete Strategy Implementations =====
@@ -1738,6 +1748,14 @@ class XFormersAttentionStrategy(AttentionStrategy):
         return out
 
 
+# ===== Cached Strategy Instances =====
+# Module-level instances to avoid repeated instantiation overhead
+
+_flash_attention_strategy = FlashAttentionStrategy()
+_native_attention_strategy = NativeAttentionStrategy()
+_xformers_attention_strategy = XFormersAttentionStrategy()
+
+
 # ===== Attention backends =====
 # The following functions maintain backward compatibility while using
 # the Strategy Pattern internally.
@@ -1758,9 +1776,8 @@ def _flash_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    """FlashAttention implementation using Strategy Pattern."""
-    strategy = FlashAttentionStrategy()
-    return strategy.compute_attention(
+    """FlashAttention implementation using Strategy Pattern with cached instance."""
+    return _flash_attention_strategy.compute_attention(
         query=query,
         key=key,
         value=value,
@@ -2210,9 +2227,8 @@ def _native_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    """Native PyTorch attention implementation using Strategy Pattern."""
-    strategy = NativeAttentionStrategy()
-    return strategy.compute_attention(
+    """Native PyTorch attention implementation using Strategy Pattern with cached instance."""
+    return _native_attention_strategy.compute_attention(
         query=query,
         key=key,
         value=value,
@@ -2707,9 +2723,8 @@ def _xformers_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    """xFormers attention implementation using Strategy Pattern."""
-    strategy = XFormersAttentionStrategy()
-    return strategy.compute_attention(
+    """xFormers attention implementation using Strategy Pattern with cached instance."""
+    return _xformers_attention_strategy.compute_attention(
         query=query,
         key=key,
         value=value,
