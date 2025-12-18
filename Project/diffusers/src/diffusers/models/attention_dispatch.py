@@ -1739,6 +1739,8 @@ class XFormersAttentionStrategy(AttentionStrategy):
 
 
 # ===== Attention backends =====
+# The following functions maintain backward compatibility while using
+# the Strategy Pattern internally.
 
 
 @_AttentionBackendRegistry.register(
@@ -1756,38 +1758,18 @@ def _flash_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    lse = None
-    if _parallel_config is None:
-        out = flash_attn_func(
-            q=query,
-            k=key,
-            v=value,
-            dropout_p=dropout_p,
-            softmax_scale=scale,
-            causal=is_causal,
-            return_attn_probs=return_lse,
-        )
-        if return_lse:
-            out, lse, *_ = out
-    else:
-        out = _templated_context_parallel_attention(
-            query,
-            key,
-            value,
-            None,
-            dropout_p,
-            is_causal,
-            scale,
-            False,
-            return_lse,
-            forward_op=_flash_attention_forward_op,
-            backward_op=_flash_attention_backward_op,
-            _parallel_config=_parallel_config,
-        )
-        if return_lse:
-            out, lse = out
-
-    return (out, lse) if return_lse else out
+    """FlashAttention implementation using Strategy Pattern."""
+    strategy = FlashAttentionStrategy()
+    return strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )
 
 
 @_AttentionBackendRegistry.register(
@@ -2228,38 +2210,20 @@ def _native_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    if return_lse:
-        raise ValueError("Native attention backend does not support setting `return_lse=True`.")
-    if _parallel_config is None:
-        query, key, value = (x.permute(0, 2, 1, 3) for x in (query, key, value))
-        out = torch.nn.functional.scaled_dot_product_attention(
-            query=query,
-            key=key,
-            value=value,
-            attn_mask=attn_mask,
-            dropout_p=dropout_p,
-            is_causal=is_causal,
-            scale=scale,
-            enable_gqa=enable_gqa,
-        )
-        out = out.permute(0, 2, 1, 3)
-    else:
-        out = _templated_context_parallel_attention(
-            query,
-            key,
-            value,
-            attn_mask,
-            dropout_p,
-            is_causal,
-            scale,
-            enable_gqa,
-            return_lse,
-            forward_op=_native_attention_forward_op,
-            backward_op=_native_attention_backward_op,
-            _parallel_config=_parallel_config,
-        )
-
-    return out
+    """Native PyTorch attention implementation using Strategy Pattern."""
+    strategy = NativeAttentionStrategy()
+    return strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        enable_gqa=enable_gqa,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )
 
 
 @_AttentionBackendRegistry.register(
@@ -2743,32 +2707,17 @@ def _xformers_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    if return_lse:
-        raise ValueError("xformers attention backend does not support setting `return_lse=True`.")
-
-    batch_size, seq_len_q, num_heads_q, _ = query.shape
-    _, seq_len_kv, num_heads_kv, _ = key.shape
-
-    if is_causal:
-        attn_mask = xops.LowerTriangularMask()
-    elif attn_mask is not None:
-        if attn_mask.ndim == 2:
-            attn_mask = attn_mask.view(attn_mask.size(0), 1, attn_mask.size(1), 1)
-        elif attn_mask.ndim != 4:
-            raise ValueError("Only 2D and 4D attention masks are supported for xformers attention.")
-        attn_mask = attn_mask.expand(batch_size, num_heads_q, seq_len_q, seq_len_kv).type_as(query)
-
-    if enable_gqa:
-        if num_heads_q % num_heads_kv != 0:
-            raise ValueError("Number of heads in query must be divisible by number of heads in key/value.")
-        num_heads_per_group = num_heads_q // num_heads_kv
-        query = query.unflatten(2, (num_heads_kv, -1))
-        key = key.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
-        value = value.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
-
-    out = xops.memory_efficient_attention(query, key, value, attn_mask, dropout_p, scale)
-
-    if enable_gqa:
-        out = out.flatten(2, 3)
-
-    return out
+    """xFormers attention implementation using Strategy Pattern."""
+    strategy = XFormersAttentionStrategy()
+    return strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        enable_gqa=enable_gqa,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )
