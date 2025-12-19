@@ -16,6 +16,7 @@ import contextlib
 import functools
 import inspect
 import math
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
@@ -1408,7 +1409,356 @@ def _templated_context_parallel_attention(
         raise ValueError("Reaching this branch of code is unexpected. Please report a bug.")
 
 
+# ===== Strategy Pattern for Attention Backends =====
+
+
+class AttentionStrategy(ABC):
+    """
+    Abstract base class for attention computation strategies.
+    
+    This class defines the interface for different attention backend implementations,
+    following the Strategy design pattern. Each concrete strategy encapsulates a 
+    specific attention computation algorithm (e.g., FlashAttention, xFormers, native PyTorch).
+    
+    Benefits of this design:
+    1. **Open/Closed Principle**: New backends can be added without modifying existing code
+    2. **Single Responsibility**: Each strategy focuses on one attention implementation
+    3. **Dependency Inversion**: High-level code depends on this abstraction, not concrete implementations
+    4. **Testability**: Each strategy can be independently unit tested
+    """
+    
+    @abstractmethod
+    def compute_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None,
+        enable_gqa: bool = False,
+        return_lse: bool = False,
+        _parallel_config: Optional["ParallelConfig"] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Compute attention using this strategy's specific algorithm.
+        
+        Args:
+            query: Query tensor of shape (batch_size, seq_len_q, num_heads, head_dim)
+            key: Key tensor of shape (batch_size, seq_len_kv, num_heads, head_dim)
+            value: Value tensor of shape (batch_size, seq_len_kv, num_heads, head_dim)
+            attn_mask: Optional attention mask
+            dropout_p: Dropout probability
+            is_causal: Whether to use causal masking
+            scale: Optional scale factor for attention scores
+            enable_gqa: Enable grouped query attention
+            return_lse: Return log-sum-exp values
+            _parallel_config: Optional parallel configuration
+            **kwargs: Additional backend-specific arguments
+            
+        Returns:
+            Output tensor or tuple of (output, lse) if return_lse is True
+        """
+        pass
+    
+    def validate_constraints(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> None:
+        """
+        Validate that inputs meet this strategy's constraints.
+        
+        This method is called before compute_attention to ensure the inputs
+        are valid for this specific backend. Subclasses can override this
+        to add backend-specific validation.
+        
+        Args:
+            query: Query tensor
+            key: Key tensor
+            value: Value tensor
+            attn_mask: Optional attention mask
+            **kwargs: Additional arguments
+            
+        Raises:
+            ValueError: If constraints are not met
+        """
+        # Default implementation: basic device and dtype checks
+        _check_device(query, key, value)
+        _check_shape(query, key, value, attn_mask)
+
+
+class AttentionStrategyFactory:
+    """
+    Factory for creating attention strategy instances.
+    
+    This factory manages the creation of strategy objects based on backend names,
+    providing a centralized place for strategy instantiation and registration.
+    Strategy instances are cached to avoid repeated instantiation overhead.
+    """
+    
+    _strategies: Dict[AttentionBackendName, type] = {}
+    _instances: Dict[AttentionBackendName, AttentionStrategy] = {}  # Instance cache
+    
+    @classmethod
+    def register_strategy(cls, backend_name: AttentionBackendName, strategy_class: type) -> None:
+        """Register a strategy class for a given backend name."""
+        cls._strategies[backend_name] = strategy_class
+        # Clear cached instance when re-registering
+        if backend_name in cls._instances:
+            del cls._instances[backend_name]
+    
+    @classmethod
+    def create_strategy(cls, backend_name: AttentionBackendName) -> AttentionStrategy:
+        """
+        Create or retrieve a cached strategy instance for the given backend.
+        
+        Args:
+            backend_name: The attention backend to create a strategy for
+            
+        Returns:
+            A cached instance of the appropriate AttentionStrategy subclass
+            
+        Raises:
+            ValueError: If the backend is not registered
+        """
+        if backend_name not in cls._strategies:
+            raise ValueError(f"No strategy registered for backend: {backend_name}")
+        
+        # Return cached instance if available
+        if backend_name not in cls._instances:
+            cls._instances[backend_name] = cls._strategies[backend_name]()
+        
+        return cls._instances[backend_name]
+
+
+# ===== Concrete Strategy Implementations =====
+
+
+class FlashAttentionStrategy(AttentionStrategy):
+    """
+    Strategy for FlashAttention backend.
+    
+    FlashAttention is an optimized attention implementation that reduces memory 
+    usage and improves speed through kernel fusion and recomputation.
+    """
+    
+    def validate_constraints(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> None:
+        """Validate FlashAttention-specific constraints."""
+        _check_device(query, key, value)
+        _check_qkv_dtype_bf16_or_fp16(query, key, value)
+        _check_shape(query, key, value, attn_mask)
+    
+    def compute_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None,
+        enable_gqa: bool = False,
+        return_lse: bool = False,
+        _parallel_config: Optional["ParallelConfig"] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Compute attention using FlashAttention."""
+        lse = None
+        if _parallel_config is None:
+            out = flash_attn_func(
+                q=query,
+                k=key,
+                v=value,
+                dropout_p=dropout_p,
+                softmax_scale=scale,
+                causal=is_causal,
+                return_attn_probs=return_lse,
+            )
+            if return_lse:
+                out, lse, *_ = out
+        else:
+            out = _templated_context_parallel_attention(
+                query,
+                key,
+                value,
+                None,
+                dropout_p,
+                is_causal,
+                scale,
+                False,
+                return_lse,
+                forward_op=_flash_attention_forward_op,
+                backward_op=_flash_attention_backward_op,
+                _parallel_config=_parallel_config,
+            )
+            if return_lse:
+                out, lse = out
+        
+        return (out, lse) if return_lse else out
+
+
+class NativeAttentionStrategy(AttentionStrategy):
+    """
+    Strategy for PyTorch native scaled dot-product attention.
+    
+    Uses torch.nn.functional.scaled_dot_product_attention, which provides
+    good performance across different hardware platforms.
+    """
+    
+    def validate_constraints(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> None:
+        """Validate native attention constraints."""
+        _check_device(query, key, value)
+        _check_shape(query, key, value, attn_mask)
+    
+    def compute_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None,
+        enable_gqa: bool = False,
+        return_lse: bool = False,
+        _parallel_config: Optional["ParallelConfig"] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Compute attention using PyTorch native implementation."""
+        if return_lse:
+            raise ValueError("Native attention backend does not support setting `return_lse=True`.")
+        
+        if _parallel_config is None:
+            query, key, value = (x.permute(0, 2, 1, 3) for x in (query, key, value))
+            out = torch.nn.functional.scaled_dot_product_attention(
+                query=query,
+                key=key,
+                value=value,
+                attn_mask=attn_mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+                enable_gqa=enable_gqa,
+            )
+            out = out.permute(0, 2, 1, 3)
+        else:
+            out = _templated_context_parallel_attention(
+                query,
+                key,
+                value,
+                attn_mask,
+                dropout_p,
+                is_causal,
+                scale,
+                enable_gqa,
+                return_lse,
+                forward_op=_native_attention_forward_op,
+                backward_op=_native_attention_backward_op,
+                _parallel_config=_parallel_config,
+            )
+        
+        return out
+
+
+class XFormersAttentionStrategy(AttentionStrategy):
+    """
+    Strategy for xFormers memory-efficient attention.
+    
+    xFormers provides optimized attention implementations with memory efficiency
+    and support for various attention patterns.
+    """
+    
+    def validate_constraints(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        is_causal: bool = False,
+        **kwargs,
+    ) -> None:
+        """Validate xFormers-specific constraints."""
+        _check_attn_mask_or_causal(attn_mask, is_causal)
+        _check_device(query, key, value)
+        _check_shape(query, key, value, attn_mask)
+    
+    def compute_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None,
+        enable_gqa: bool = False,
+        return_lse: bool = False,
+        _parallel_config: Optional["ParallelConfig"] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Compute attention using xFormers."""
+        if return_lse:
+            raise ValueError("xformers attention backend does not support setting `return_lse=True`.")
+        
+        batch_size, seq_len_q, num_heads_q, _ = query.shape
+        _, seq_len_kv, num_heads_kv, _ = key.shape
+        
+        if is_causal:
+            attn_mask = xops.LowerTriangularMask()
+        elif attn_mask is not None:
+            if attn_mask.ndim == 2:
+                attn_mask = attn_mask.view(attn_mask.size(0), 1, attn_mask.size(1), 1)
+            elif attn_mask.ndim != 4:
+                raise ValueError("Only 2D and 4D attention masks are supported for xformers attention.")
+            attn_mask = attn_mask.expand(batch_size, num_heads_q, seq_len_q, seq_len_kv).type_as(query)
+        
+        if enable_gqa:
+            if num_heads_q % num_heads_kv != 0:
+                raise ValueError("Number of heads in query must be divisible by number of heads in key/value.")
+            num_heads_per_group = num_heads_q // num_heads_kv
+            query = query.unflatten(2, (num_heads_kv, -1))
+            key = key.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
+            value = value.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
+        
+        out = xops.memory_efficient_attention(query, key, value, attn_mask, dropout_p, scale)
+        
+        if enable_gqa:
+            out = out.flatten(2, 3)
+        
+        return out
+
+
+# ===== Cached Strategy Instances =====
+# Module-level instances to avoid repeated instantiation overhead
+
+_flash_attention_strategy = FlashAttentionStrategy()
+_native_attention_strategy = NativeAttentionStrategy()
+_xformers_attention_strategy = XFormersAttentionStrategy()
+
+
 # ===== Attention backends =====
+# The following functions maintain backward compatibility while using
+# the Strategy Pattern internally.
 
 
 @_AttentionBackendRegistry.register(
@@ -1426,38 +1776,17 @@ def _flash_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    lse = None
-    if _parallel_config is None:
-        out = flash_attn_func(
-            q=query,
-            k=key,
-            v=value,
-            dropout_p=dropout_p,
-            softmax_scale=scale,
-            causal=is_causal,
-            return_attn_probs=return_lse,
-        )
-        if return_lse:
-            out, lse, *_ = out
-    else:
-        out = _templated_context_parallel_attention(
-            query,
-            key,
-            value,
-            None,
-            dropout_p,
-            is_causal,
-            scale,
-            False,
-            return_lse,
-            forward_op=_flash_attention_forward_op,
-            backward_op=_flash_attention_backward_op,
-            _parallel_config=_parallel_config,
-        )
-        if return_lse:
-            out, lse = out
-
-    return (out, lse) if return_lse else out
+    """FlashAttention implementation using Strategy Pattern with cached instance."""
+    return _flash_attention_strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )
 
 
 @_AttentionBackendRegistry.register(
@@ -1898,38 +2227,19 @@ def _native_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    if return_lse:
-        raise ValueError("Native attention backend does not support setting `return_lse=True`.")
-    if _parallel_config is None:
-        query, key, value = (x.permute(0, 2, 1, 3) for x in (query, key, value))
-        out = torch.nn.functional.scaled_dot_product_attention(
-            query=query,
-            key=key,
-            value=value,
-            attn_mask=attn_mask,
-            dropout_p=dropout_p,
-            is_causal=is_causal,
-            scale=scale,
-            enable_gqa=enable_gqa,
-        )
-        out = out.permute(0, 2, 1, 3)
-    else:
-        out = _templated_context_parallel_attention(
-            query,
-            key,
-            value,
-            attn_mask,
-            dropout_p,
-            is_causal,
-            scale,
-            enable_gqa,
-            return_lse,
-            forward_op=_native_attention_forward_op,
-            backward_op=_native_attention_backward_op,
-            _parallel_config=_parallel_config,
-        )
-
-    return out
+    """Native PyTorch attention implementation using Strategy Pattern with cached instance."""
+    return _native_attention_strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        enable_gqa=enable_gqa,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )
 
 
 @_AttentionBackendRegistry.register(
@@ -2413,32 +2723,16 @@ def _xformers_attention(
     return_lse: bool = False,
     _parallel_config: Optional["ParallelConfig"] = None,
 ) -> torch.Tensor:
-    if return_lse:
-        raise ValueError("xformers attention backend does not support setting `return_lse=True`.")
-
-    batch_size, seq_len_q, num_heads_q, _ = query.shape
-    _, seq_len_kv, num_heads_kv, _ = key.shape
-
-    if is_causal:
-        attn_mask = xops.LowerTriangularMask()
-    elif attn_mask is not None:
-        if attn_mask.ndim == 2:
-            attn_mask = attn_mask.view(attn_mask.size(0), 1, attn_mask.size(1), 1)
-        elif attn_mask.ndim != 4:
-            raise ValueError("Only 2D and 4D attention masks are supported for xformers attention.")
-        attn_mask = attn_mask.expand(batch_size, num_heads_q, seq_len_q, seq_len_kv).type_as(query)
-
-    if enable_gqa:
-        if num_heads_q % num_heads_kv != 0:
-            raise ValueError("Number of heads in query must be divisible by number of heads in key/value.")
-        num_heads_per_group = num_heads_q // num_heads_kv
-        query = query.unflatten(2, (num_heads_kv, -1))
-        key = key.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
-        value = value.unflatten(2, (num_heads_kv, -1)).expand(-1, -1, -1, num_heads_per_group, -1)
-
-    out = xops.memory_efficient_attention(query, key, value, attn_mask, dropout_p, scale)
-
-    if enable_gqa:
-        out = out.flatten(2, 3)
-
-    return out
+    """xFormers attention implementation using Strategy Pattern with cached instance."""
+    return _xformers_attention_strategy.compute_attention(
+        query=query,
+        key=key,
+        value=value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        enable_gqa=enable_gqa,
+        return_lse=return_lse,
+        _parallel_config=_parallel_config,
+    )

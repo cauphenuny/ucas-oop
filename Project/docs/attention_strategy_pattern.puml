@@ -1,0 +1,172 @@
+@startuml Attention Strategy Pattern
+
+!define ABSTRACT_CLASS abstract class
+!define INTERFACE interface
+
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor<<Abstract>> LightBlue
+    BackgroundColor<<Concrete>> LightGreen
+    BackgroundColor<<Factory>> LightYellow
+    BorderColor Black
+    ArrowColor Black
+}
+
+' Abstract base class
+ABSTRACT_CLASS AttentionStrategy <<Abstract>> {
+    {abstract} +compute_attention(query, key, value, ...): Tensor
+    +validate_constraints(query, key, value, ...): None
+    --
+    **Benefits:**
+    • Open/Closed Principle
+    • Single Responsibility
+    • Dependency Inversion
+    • Enhanced Testability
+}
+
+' Factory class
+class AttentionStrategyFactory <<Factory>> {
+    {static} -_strategies: Dict[BackendName, Type]
+    {static} -_instances: Dict[BackendName, Strategy]
+    --
+    {static} +register_strategy(backend_name, strategy_class): None
+    {static} +create_strategy(backend_name): AttentionStrategy
+    --
+    **Features:**
+    • Instance caching
+    • Lazy instantiation
+    • Registry pattern
+}
+
+' Concrete strategy implementations
+class FlashAttentionStrategy <<Concrete>> {
+    +compute_attention(query, key, value, ...): Tensor
+    +validate_constraints(query, key, value, ...): None
+    --
+    **Implementation:**
+    • FlashAttention kernel
+    • bf16/fp16 precision
+    • Context-parallel support
+    --
+    **Constraints:**
+    • Device: CUDA
+    • Dtype: bf16 or fp16
+    • Shape validation
+}
+
+class NativeAttentionStrategy <<Concrete>> {
+    +compute_attention(query, key, value, ...): Tensor
+    +validate_constraints(query, key, value, ...): None
+    --
+    **Implementation:**
+    • PyTorch scaled_dot_product_attention
+    • Cross-platform support
+    • Context-parallel support
+    --
+    **Constraints:**
+    • Device matching
+    • Shape validation
+}
+
+class XFormersAttentionStrategy <<Concrete>> {
+    +compute_attention(query, key, value, ...): Tensor
+    +validate_constraints(query, key, value, ...): None
+    --
+    **Implementation:**
+    • xFormers memory_efficient_attention
+    • Various attention patterns
+    • GQA support
+    --
+    **Constraints:**
+    • Mask/causal validation
+    • Device matching
+    • Shape validation
+}
+
+' Module-level cached instances
+class "Module Level" as ModuleLevel {
+    {static} _flash_attention_strategy: FlashAttentionStrategy
+    {static} _native_attention_strategy: NativeAttentionStrategy
+    {static} _xformers_attention_strategy: XFormersAttentionStrategy
+    --
+    **Purpose:**
+    • Zero instantiation overhead
+    • Pre-cached for hot paths
+}
+
+' Backend functions (backward compatibility layer)
+class "Backend Functions" as BackendFunctions {
+    +_flash_attention(query, key, value, ...): Tensor
+    +_native_attention(query, key, value, ...): Tensor
+    +_xformers_attention(query, key, value, ...): Tensor
+    --
+    **Role:**
+    • Backward compatibility
+    • Delegate to strategies
+    • Registry integration
+}
+
+' Registry system (existing)
+class "_AttentionBackendRegistry" as Registry {
+    {static} _backends: Dict
+    {static} _constraints: Dict
+    {static} _active_backend: BackendName
+    --
+    {static} +register(backend, constraints, ...): Decorator
+    {static} +get_active_backend(): Tuple
+    --
+    **Existing System**
+}
+
+' Relationships
+AttentionStrategy <|-- FlashAttentionStrategy
+AttentionStrategy <|-- NativeAttentionStrategy
+AttentionStrategy <|-- XFormersAttentionStrategy
+
+AttentionStrategyFactory ..> AttentionStrategy : creates
+AttentionStrategyFactory o-- FlashAttentionStrategy : caches
+AttentionStrategyFactory o-- NativeAttentionStrategy : caches
+AttentionStrategyFactory o-- XFormersAttentionStrategy : caches
+
+ModuleLevel *-- FlashAttentionStrategy : contains
+ModuleLevel *-- NativeAttentionStrategy : contains
+ModuleLevel *-- XFormersAttentionStrategy : contains
+
+BackendFunctions ..> ModuleLevel : uses
+Registry o-- BackendFunctions : registers
+
+' Notes
+note right of AttentionStrategy
+    **Strategy Pattern**
+    
+    Defines the interface for all
+    attention backend implementations.
+    Each concrete strategy encapsulates
+    a specific algorithm.
+end note
+
+note right of AttentionStrategyFactory
+    **Factory Pattern**
+    
+    Manages strategy creation and
+    caching. Ensures singleton-like
+    behavior for strategy instances.
+end note
+
+note bottom of ModuleLevel
+    **Performance Optimization**
+    
+    Module-level cached instances avoid
+    repeated instantiation overhead.
+    Zero-cost abstraction achieved.
+end note
+
+note bottom of BackendFunctions
+    **Backward Compatibility**
+    
+    Existing function-based API delegates
+    to strategy pattern internally.
+    No breaking changes for users.
+end note
+
+@enduml

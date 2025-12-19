@@ -1,0 +1,61 @@
+@startuml Attention Strategy Pattern - Runtime Flow
+
+!define ABSTRACT_CLASS abstract class
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor "User Code" as User
+participant "Backend Function\n(_flash_attention)" as Backend
+participant "Module Cache\n(_flash_attention_strategy)" as Cache
+participant "FlashAttentionStrategy" as Strategy
+participant "flash_attn_func\n(External Library)" as Library
+
+User -> Backend: _flash_attention(query, key, value, ...)
+activate Backend
+
+note right of Backend
+    Backward compatibility layer
+    Delegates to cached strategy
+end note
+
+Backend -> Cache: get cached instance
+activate Cache
+Cache --> Backend: FlashAttentionStrategy instance
+deactivate Cache
+
+Backend -> Strategy: compute_attention(query, key, value, ...)
+activate Strategy
+
+note right of Strategy
+    Strategy encapsulates
+    algorithm-specific logic
+end note
+
+Strategy -> Strategy: validate_constraints(query, key, value)
+
+alt No parallel config
+    Strategy -> Library: flash_attn_func(q, k, v, ...)
+    activate Library
+    Library --> Strategy: output
+    deactivate Library
+else With parallel config
+    Strategy -> Strategy: _templated_context_parallel_attention(...)
+    note right: Context-parallel computation
+end
+
+Strategy --> Backend: result
+deactivate Strategy
+
+Backend --> User: result
+deactivate Backend
+
+note over User, Library
+    **Key Benefits:**
+    • Zero instantiation overhead (cached instances)
+    • Clean separation of concerns
+    • Easy to test and extend
+    • Backward compatible
+end note
+
+@enduml
