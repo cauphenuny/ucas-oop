@@ -25,6 +25,10 @@ from diffsynth.pipelines.wan_video import ModelConfig, WanVideoPipeline
 
 DEFAULT_MODEL_ID = "PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera"
 DEFAULT_TOKENIZER_MODEL = "Wan-AI/Wan2.1-T2V-1.3B"
+VIDEO_TARGET_WIDTH = 832
+VIDEO_TARGET_HEIGHT = 480
+VIDEO_TARGET_SIZE = (VIDEO_TARGET_WIDTH, VIDEO_TARGET_HEIGHT)
+
 DEFAULT_CAMERA_ORIGIN = (
     0,
     0.532139961,
@@ -95,7 +99,8 @@ def load_video_frames(path: Path, limit: Optional[int]) -> List[Image.Image]:
         for idx, frame in enumerate(reader):
             if limit is not None and idx >= limit:
                 break
-            frames.append(Image.fromarray(frame).convert("RGB"))
+            frame_image = Image.fromarray(frame).convert("RGB")
+            frames.append(_resize_frame(frame_image))
     finally:
         reader.close()
     if not frames:
@@ -258,11 +263,15 @@ def export_artifacts(output_dir: Path, stem: str, tensors: Dict[str, torch.Tenso
     meta_path.write_text(json.dumps(metadata, indent=2))
 
 
+def _resize_frame(image: Image.Image) -> Image.Image:
+    return image.resize(VIDEO_TARGET_SIZE, resample=Image.LANCZOS)
+
+
 def main():
     args = parse_args()
     dtype = str_to_dtype(args.dtype)
     control_frames = load_video_frames(args.control_video, args.num_frames)
-    input_image = Image.open(args.input_image).convert("RGB")
+    input_image = _resize_frame(Image.open(args.input_image).convert("RGB"))
     height = input_image.height
     width = input_image.width
     available_frames = len(control_frames)
