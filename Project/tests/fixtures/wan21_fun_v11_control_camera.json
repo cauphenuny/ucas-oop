@@ -1,0 +1,91 @@
+{
+  "model_id": "PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera",
+  "prompt": "Unit test prompt",
+  "negative_prompt": "",
+  "num_frames": 81,
+  "height": 480,
+  "width": 832,
+  "block_interval": 6,
+  "tensors": {
+    "image_vae_embedding": {
+      "shape": [
+        1,
+        20,
+        21,
+        60,
+        104
+      ],
+      "dtype": "torch.float16"
+    },
+    "control_condition_embedding": {
+      "shape": [
+        1,
+        36,
+        21,
+        60,
+        104
+      ],
+      "dtype": "torch.float16"
+    },
+    "patchify_tensor": {
+      "shape": [
+        1,
+        1536,
+        21,
+        30,
+        52
+      ],
+      "dtype": "torch.float16"
+    },
+    "patch_sequence": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    }
+  },
+  "blocks": {
+    "block_000": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    },
+    "block_006": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    },
+    "block_012": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    },
+    "block_018": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    },
+    "block_024": {
+      "shape": [
+        1,
+        32760,
+        1536
+      ],
+      "dtype": "torch.float16"
+    }
+  }
+}
