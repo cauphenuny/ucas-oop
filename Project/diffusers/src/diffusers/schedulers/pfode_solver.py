@@ -47,6 +47,36 @@ class PFODESolver:
         
         self.stepsize = (t_terminal - t_initial) / (train_step_terminal - train_step_initial)  # 1/1000
     
+    def get_guidance_scale_embedding(self, w, embedding_dim=512, dtype=torch.float32):
+        """
+        Get guidance scale embedding for time conditioning.
+        
+        See https://github.com/google-research/vdm/blob/dc27b98a554f65cdc654b800da5aa1846545d41b/model_vdm.py#L298
+        
+        Args:
+            w (`torch.Tensor`):
+                Generate embedding vectors at these guidance scales.
+            embedding_dim (`int`, *optional*, defaults to 512):
+                Dimension of the embeddings to generate.
+            dtype:
+                Data type of the generated embeddings.
+                
+        Returns:
+            `torch.Tensor`: Embedding vectors with shape `(len(w), embedding_dim)`.
+        """
+        assert len(w.shape) == 1
+        w = w * 1000.0
+
+        half_dim = embedding_dim // 2
+        emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=dtype) * -emb)
+        emb = w.to(dtype)[:, None] * emb[None, :]
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if embedding_dim % 2 == 1:  # zero pad
+            emb = torch.nn.functional.pad(emb, (0, 1))
+        assert emb.shape == (w.shape[0], embedding_dim)
+        return emb
+    
     def get_timesteps(self, t_start: torch.FloatTensor, t_end: torch.FloatTensor, num_steps: int) -> torch.LongTensor:
         """
         Generate timesteps for the ODE solver.
@@ -215,6 +245,36 @@ class PFODESolverSDXL:
         train_step_initial = train_step_terminal + self.scheduler.config.num_train_timesteps  # 0+1000
         
         self.stepsize = (t_terminal - t_initial) / (train_step_terminal - train_step_initial)  # 1/1000
+    
+    def get_guidance_scale_embedding(self, w, embedding_dim=512, dtype=torch.float32):
+        """
+        Get guidance scale embedding for time conditioning.
+        
+        See https://github.com/google-research/vdm/blob/dc27b98a554f65cdc654b800da5aa1846545d41b/model_vdm.py#L298
+        
+        Args:
+            w (`torch.Tensor`):
+                Generate embedding vectors at these guidance scales.
+            embedding_dim (`int`, *optional*, defaults to 512):
+                Dimension of the embeddings to generate.
+            dtype:
+                Data type of the generated embeddings.
+                
+        Returns:
+            `torch.Tensor`: Embedding vectors with shape `(len(w), embedding_dim)`.
+        """
+        assert len(w.shape) == 1
+        w = w * 1000.0
+
+        half_dim = embedding_dim // 2
+        emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=dtype) * -emb)
+        emb = w.to(dtype)[:, None] * emb[None, :]
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if embedding_dim % 2 == 1:  # zero pad
+            emb = torch.nn.functional.pad(emb, (0, 1))
+        assert emb.shape == (w.shape[0], embedding_dim)
+        return emb
     
     def get_timesteps(self, t_start: torch.FloatTensor, t_end: torch.FloatTensor, num_steps: int) -> torch.LongTensor:
         """

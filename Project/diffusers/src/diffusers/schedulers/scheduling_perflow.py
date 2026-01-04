@@ -15,6 +15,7 @@
 # DISCLAIMER: This code is strongly influenced by https://github.com/pesser/pytorch_diffusion
 # and https://github.com/hojonathanho/diffusion
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
@@ -25,6 +26,9 @@ import torch
 from ..configuration_utils import ConfigMixin, register_to_config
 from ..utils import BaseOutput
 from .scheduling_utils import KarrasDiffusionSchedulers, SchedulerMixin
+
+
+logger = logging.getLogger(__name__)
 
 
 class TimeWindows:
@@ -275,7 +279,10 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         """
         if num_inference_steps < self.config.num_time_windows:
             num_inference_steps = self.config.num_time_windows
-            print(f"### We recommend a num_inference_steps not less than num_time_windows. It's set as {self.config.num_time_windows}.")
+            logger.warning(
+                f"We recommend a num_inference_steps not less than num_time_windows. "
+                f"It's set as {self.config.num_time_windows}."
+            )
 
         timesteps = []
         for i in range(self.config.num_time_windows):
@@ -383,7 +390,6 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
             
         elif self.config.prediction_type == "diff_eps":
             pred_epsilon = model_output
-            t_c = timestep / self.config.num_train_timesteps
             t_s, t_e, _, c_to_s, gamma_s_e, _, _ = self.get_window_alpha(t_c)
             
             lambda_s = 1 / gamma_s_e

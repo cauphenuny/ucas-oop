@@ -16,6 +16,7 @@
 Utility functions for PeRFlow implementation.
 """
 
+import logging
 import os
 from collections import OrderedDict
 from typing import Optional
@@ -23,6 +24,9 @@ from typing import Optional
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
+
+
+logger = logging.getLogger(__name__)
 
 
 def merge_delta_weights_into_unet(pipe, delta_weights: OrderedDict) -> object:
@@ -41,7 +45,8 @@ def merge_delta_weights_into_unet(pipe, delta_weights: OrderedDict) -> object:
         The pipeline with updated UNet weights.
     """
     unet_weights = pipe.unet.state_dict()
-    assert unet_weights.keys() == delta_weights.keys()
+    if unet_weights.keys() != delta_weights.keys():
+        raise ValueError("UNet and delta weights have mismatched keys")
     
     for key in delta_weights.keys():
         dtype = unet_weights[key].dtype
@@ -75,30 +80,35 @@ def load_delta_weights_into_unet(
     """
     # Load delta_weights
     if os.path.exists(os.path.join(model_path, "delta_weights.safetensors")):
-        print("### delta_weights exists, loading...")
+        logger.info("Delta weights exist, loading...")
         delta_weights = OrderedDict()
         with safe_open(os.path.join(model_path, "delta_weights.safetensors"), framework="pt", device="cpu") as f:
             for key in f.keys():
                 delta_weights[key] = f.get_tensor(key)
                 
     elif os.path.exists(os.path.join(model_path, "diffusion_pytorch_model.safetensors")):
-        print("### merged_weights exists, loading...")
+        logger.info("Merged weights exist, loading...")
         merged_weights = OrderedDict()
         with safe_open(os.path.join(model_path, "diffusion_pytorch_model.safetensors"), framework="pt", device="cpu") as f:
             for key in f.keys():
                 merged_weights[key] = f.get_tensor(key)
         
         # Import here to avoid circular dependency
-        from ..pipelines.stable_diffusion import StableDiffusionPipeline
-        base_weights = StableDiffusionPipeline.from_pretrained(
-            base_path, torch_dtype=torch.float16, safety_checker=None).unet.state_dict()
-        assert base_weights.keys() == merged_weights.keys()
+        # Load only UNet to reduce memory usage
+        from ..models import UNet2DConditionModel
+        base_unet = UNet2DConditionModel.from_pretrained(
+            base_path, subfolder="unet", torch_dtype=torch.float16
+        )
+        base_weights = base_unet.state_dict()
+        
+        if base_weights.keys() != merged_weights.keys():
+            raise ValueError("Base weights and merged weights have mismatched keys")
         
         delta_weights = OrderedDict()
         for key in merged_weights.keys():
             delta_weights[key] = merged_weights[key] - base_weights[key].to(device=merged_weights[key].device, dtype=merged_weights[key].dtype)
         
-        print("### saving delta_weights...")
+        logger.info("Saving delta weights...")
         save_file(delta_weights, os.path.join(model_path, "delta_weights.safetensors"))
         
     else:
@@ -124,7 +134,8 @@ def load_dreambooth_into_pipeline(pipe, sd_dreambooth: str) -> object:
     Returns:
         The pipeline with updated weights.
     """
-    assert sd_dreambooth.endswith(".safetensors")
+    if not sd_dreambooth.endswith(".safetensors"):
+        raise ValueError(f"Expected .safetensors file, got {sd_dreambooth}")
     
     state_dict = {}
     with safe_open(sd_dreambooth, framework="pt", device="cpu") as f:
@@ -139,6 +150,10 @@ def load_dreambooth_into_pipeline(pipe, sd_dreambooth: str) -> object:
     )
     
     unet_config = {}  # unet, line 449 in convert_ldm_unet_checkpoint
+    # `num_class_embeds` is a Diffusers-specific UNet config field used for class conditioning.
+    # The legacy `convert_ldm_unet_checkpoint` helper expects only the original LDM UNet config
+    # keys and does not know about `num_class_embeds`, so we explicitly drop it here to avoid
+    # passing an unsupported/irrelevant option into the conversion function.
     for key in pipe.unet.config.keys():
         if key != 'num_class_embeds':
             unet_config[key] = pipe.unet.config[key]
