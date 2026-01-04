@@ -71,7 +71,7 @@ class PFODESolver:
         interval = (t_end - t_start) / (torch.ones([1], device=t_start.device) * num_steps)
         timepoints = t_start + interval * timepoints
         
-        timesteps = (self.scheduler.num_train_timesteps - 1) + (timepoints - self.t_initial) / self.stepsize
+        timesteps = (self.scheduler.config.num_train_timesteps - 1) + (timepoints - self.t_initial) / self.stepsize
         return timesteps.round().long()
     
     def solve(
@@ -240,7 +240,7 @@ class PFODESolverSDXL:
         interval = (t_end - t_start) / (torch.ones([1], device=t_start.device) * num_steps)
         timepoints = t_start + interval * timepoints
         
-        timesteps = (self.scheduler.num_train_timesteps - 1) + (timepoints - self.t_initial) / self.stepsize
+        timesteps = (self.scheduler.config.num_train_timesteps - 1) + (timepoints - self.t_initial) / self.stepsize
         return timesteps.round().long()
     
     def _get_add_time_ids(
