@@ -613,7 +613,7 @@ image = pipe(
     - 三种预测类型 (ddim_eps, diff_eps, velocity)
     - 噪声添加/移除
     - 配置持久化
-  
+
   - ODE Solver 测试：20/20 通过
     - SD 和 SDXL 求解器
     - 分类器无关引导
@@ -623,6 +623,52 @@ image = pipe(
     - Delta 权重合并
     - 数据类型处理
 ]
+
+== 测试修复的问题
+
+- *Bug #1 · Type Conversion*（scheduling_perflow.py）
+  `get_window_alpha()` 偶尔收到 Python `float`，在进行张量减法时会触发 `NaN`。现在先检测参数类型，再就地包成张量：
+  ```python
+  if not isinstance(timepoints, torch.Tensor):
+      timepoints = torch.tensor(timepoints, dtype=torch.float32)
+  ```
+  这样所有窗口推导都用统一 dtype/device，彻底消除了数值漂移导致的测试告警。
+
+- *Bug #2 · Index Bounds*（scheduling_perflow.py）
+  终止时间点落在边界外时，`get_window()` 可能访问不存在的窗口。通过上线检查把索引夹在最后一个窗口内：
+  ```python
+  if idx >= len(self.window_starts):
+      idx = len(self.window_starts) - 1
+  ```
+  结合对 `tp` 的微调，这个改动让极端 timestep 不再抛出 `IndexError`。
+
+---
+
+- *Bug #3 · Timestep Lookup*（scheduling_perflow.py）
+  `step()` 曾用 `argwhere` 查找 timestep，返回值在布尔运算中语义不明。改成 `nonzero()` 并立即取出下标：
+  ```python
+  idx = (self.timesteps == timestep).nonzero()
+  if len(idx) > 0:
+      idx = idx[0].item()
+  ```
+  这段逻辑保证了 `dt` 的计算在所有窗口都保持稳定。
+
+- *Bug #4 · Terminal Timestep*（scheduling_perflow.py）
+  当 `t_c` 接近 `t_clean` 时，会出现除以 0 的情况。我们在步进开头做了终止判断：
+  ```python
+  if t_c <= self.config.t_clean + 1e-6:
+      return PeRFlowSchedulerOutput(prev_sample=sample, pred_original_sample=None)
+  ```
+  现在最后一个 timestep 直接短路返回，数值计算不再输出 `NaN`。
+
+---
+
+- *Bug #5 · Prediction Types*（pfode_solver.py）
+  ODE 求解器之前仅接受 `"epsilon"`，与调度器暴露的 `"ddim_eps"`、`"diff_eps"` 不兼容。修复方式是把三种等价类型统一到同一分支：
+  ```python
+  if self.scheduler.config.prediction_type in ["epsilon", "ddim_eps", "diff_eps"]:
+      pred_original_sample = ...
+  ```
 
 
 ---
@@ -680,7 +726,7 @@ image = pipe(
 
 *扩展部分*：
 - PeRFlow 调度器实现
-- 完整的测试覆盖（98.9%）
+- 完整的测试覆盖
 - 文档和示例完善
 
 === 技术收获
