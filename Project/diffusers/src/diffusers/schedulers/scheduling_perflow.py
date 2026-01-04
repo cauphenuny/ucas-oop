@@ -15,6 +15,7 @@
 # DISCLAIMER: This code is strongly influenced by https://github.com/pesser/pytorch_diffusion
 # and https://github.com/hojonathanho/diffusion
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
@@ -25,6 +26,9 @@ import torch
 from ..configuration_utils import ConfigMixin, register_to_config
 from ..utils import BaseOutput
 from .scheduling_utils import KarrasDiffusionSchedulers, SchedulerMixin
+
+
+logger = logging.getLogger(__name__)
 
 
 class TimeWindows:
@@ -44,7 +48,12 @@ class TimeWindows:
     
     def __init__(self, t_initial: float = 1.0, t_terminal: float = 0.0, num_windows: int = 4, precision: float = 1.0/1000) -> None:
         """Initialize time windows for piecewise rectified flow."""
-        raise NotImplementedError("TimeWindows.__init__ is not implemented yet")
+        assert t_terminal < t_initial
+        time_windows = [1.0 * i / num_windows for i in range(1, num_windows + 1)][::-1]
+        
+        self.window_starts = time_windows  # [1.0, 0.75, 0.5, 0.25]
+        self.window_ends = time_windows[1:] + [t_terminal]  # [0.75, 0.5, 0.25, 0]
+        self.precision = precision
     
     def get_window(self, tp: float) -> Tuple[float, float]:
         """
@@ -57,7 +66,20 @@ class TimeWindows:
         Returns:
             `Tuple[float, float]`: A tuple of (window_start, window_end).
         """
-        raise NotImplementedError("TimeWindows.get_window is not implemented yet")
+        # Convert tensor to float if needed
+        if isinstance(tp, torch.Tensor):
+            tp = tp.item()
+            
+        idx = 0
+        # robust to numerical error; e.g, (0.6+1/10000) belongs to [0.6, 0.3)
+        while idx < len(self.window_ends) and (tp - 0.1 * self.precision) <= self.window_ends[idx]:
+            idx += 1
+        
+        # Handle edge case: if we've gone past all windows, use the last window
+        if idx >= len(self.window_starts):
+            idx = len(self.window_starts) - 1
+            
+        return self.window_starts[idx], self.window_ends[idx]
     
     def lookup_window(self, timepoint: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         """
@@ -70,7 +92,20 @@ class TimeWindows:
         Returns:
             `Tuple[torch.FloatTensor, torch.FloatTensor]`: A tuple of (window_starts, window_ends).
         """
-        raise NotImplementedError("TimeWindows.lookup_window is not implemented yet")
+        if timepoint.dim() == 0:
+            t_start, t_end = self.get_window(timepoint)
+            t_start = torch.ones_like(timepoint) * t_start
+            t_end = torch.ones_like(timepoint) * t_end
+        else:
+            t_start = torch.zeros_like(timepoint)
+            t_end = torch.zeros_like(timepoint)
+            bsz = timepoint.shape[0]
+            for i in range(bsz):
+                tp = timepoint[i]
+                ts, te = self.get_window(tp)
+                t_start[i] = ts
+                t_end[i] = te
+        return t_start, t_end
 
 
 @dataclass
@@ -110,7 +145,21 @@ def betas_for_alpha_bar(
     Returns:
         `torch.FloatTensor`: The betas used by the scheduler to step the model outputs.
     """
-    raise NotImplementedError("betas_for_alpha_bar is not implemented yet")
+    if alpha_transform_type == "cosine":
+        def alpha_bar_fn(t):
+            return math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2
+    elif alpha_transform_type == "exp":
+        def alpha_bar_fn(t):
+            return math.exp(t * -12.0)
+    else:
+        raise ValueError(f"Unsupported alpha_transform_type: {alpha_transform_type}")
+
+    betas = []
+    for i in range(num_diffusion_timesteps):
+        t1 = i / num_diffusion_timesteps
+        t2 = (i + 1) / num_diffusion_timesteps
+        betas.append(min(1 - alpha_bar_fn(t2) / alpha_bar_fn(t1), max_beta))
+    return torch.tensor(betas, dtype=torch.float32)
 
 
 class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
@@ -167,7 +216,39 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         num_time_windows: int = 4,
     ):
         """Initialize the PeRFlowScheduler."""
-        raise NotImplementedError("PeRFlowScheduler.__init__ is not implemented yet")
+        if trained_betas is not None:
+            self.betas = torch.tensor(trained_betas, dtype=torch.float32)
+        elif beta_schedule == "linear":
+            self.betas = torch.linspace(beta_start, beta_end, num_train_timesteps, dtype=torch.float32)
+        elif beta_schedule == "scaled_linear":
+            # this schedule is very specific to the latent diffusion model.
+            self.betas = torch.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=torch.float32) ** 2
+        elif beta_schedule == "squaredcos_cap_v2":
+            # Glide cosine schedule
+            self.betas = betas_for_alpha_bar(num_train_timesteps)
+        else:
+            raise NotImplementedError(f"{beta_schedule} is not implemented for {self.__class__}")
+
+        self.alphas = 1.0 - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+
+        # At every step in ddim, we are looking into the previous alphas_cumprod
+        # For the final step, there is no previous alphas_cumprod because we are already at 0
+        # `set_alpha_to_one` decides whether we set this parameter simply to one or
+        # whether we use the final alpha of the "non-previous" one.
+        self.final_alpha_cumprod = torch.tensor(1.0) if set_alpha_to_one else self.alphas_cumprod[0]
+        
+        # standard deviation of the initial noise distribution
+        self.init_noise_sigma = 1.0
+
+        self.time_windows = TimeWindows(
+            t_initial=t_noise, 
+            t_terminal=t_clean, 
+            num_windows=num_time_windows, 
+            precision=1.0/num_train_timesteps
+        )
+        
+        assert prediction_type in ["ddim_eps", "diff_eps", "velocity"]
 
     def scale_model_input(self, sample: torch.FloatTensor, timestep: Optional[int] = None) -> torch.FloatTensor:
         """
@@ -184,7 +265,7 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
             `torch.FloatTensor`:
                 A scaled input sample.
         """
-        raise NotImplementedError("PeRFlowScheduler.scale_model_input is not implemented yet")
+        return sample
 
     def set_timesteps(self, num_inference_steps: int, device: Union[str, torch.device] = None):
         """
@@ -196,7 +277,30 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
             device (`str` or `torch.device`, *optional*):
                 The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
         """
-        raise NotImplementedError("PeRFlowScheduler.set_timesteps is not implemented yet")
+        if num_inference_steps < self.config.num_time_windows:
+            num_inference_steps = self.config.num_time_windows
+            logger.warning(
+                f"We recommend a num_inference_steps not less than num_time_windows. "
+                f"It's set as {self.config.num_time_windows}."
+            )
+
+        timesteps = []
+        for i in range(self.config.num_time_windows):
+            if i < num_inference_steps % self.config.num_time_windows:
+                num_steps_cur_win = num_inference_steps // self.config.num_time_windows + 1
+            else:
+                num_steps_cur_win = num_inference_steps // self.config.num_time_windows
+
+            t_s = self.time_windows.window_starts[i]
+            t_e = self.time_windows.window_ends[i]
+            timesteps_cur_win = np.linspace(t_s, t_e, num=num_steps_cur_win, endpoint=False)
+            timesteps.append(timesteps_cur_win)
+                        
+        timesteps = np.concatenate(timesteps)
+
+        self.timesteps = torch.from_numpy(
+            (timesteps * self.config.num_train_timesteps).astype(np.int64)
+        ).to(device)
 
     def get_window_alpha(self, timepoints: torch.FloatTensor) -> Tuple[torch.FloatTensor, ...]:
         """
@@ -216,7 +320,27 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
                 - alphas_cumprod_start: Cumulative alpha product at window start
                 - alphas_cumprod_end: Cumulative alpha product at window end
         """
-        raise NotImplementedError("PeRFlowScheduler.get_window_alpha is not implemented yet")
+        time_windows = self.time_windows
+        num_train_timesteps = self.config.num_train_timesteps
+        
+        # Convert to tensor if needed
+        if not isinstance(timepoints, torch.Tensor):
+            timepoints = torch.tensor(timepoints, dtype=torch.float32)
+        
+        t_win_start, t_win_end = time_windows.lookup_window(timepoints)
+        t_win_len = t_win_end - t_win_start
+        t_interval = timepoints - t_win_start  # NOTE: negative value
+
+        idx_start = (t_win_start * num_train_timesteps - 1).long()
+        alphas_cumprod_start = self.alphas_cumprod[idx_start]
+        
+        idx_end = torch.clamp((t_win_end * num_train_timesteps - 1).long(), min=0)
+        alphas_cumprod_end = self.alphas_cumprod[idx_end]
+
+        alpha_cumprod_s_e = alphas_cumprod_start / alphas_cumprod_end      
+        gamma_s_e = alpha_cumprod_s_e ** 0.5
+        
+        return t_win_start, t_win_end, t_win_len, t_interval, gamma_s_e, alphas_cumprod_start, alphas_cumprod_end
 
     def step(
         self,
@@ -244,7 +368,69 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
                 If return_dict is `True`, [`~schedulers.scheduling_perflow.PeRFlowSchedulerOutput`] is returned,
                 otherwise a tuple is returned where the first element is the sample tensor.
         """
-        raise NotImplementedError("PeRFlowScheduler.step is not implemented yet")
+        # Handle edge case: if at or very close to terminal timestep, return sample as-is
+        t_c = timestep / self.config.num_train_timesteps
+        if t_c <= self.config.t_clean + 1e-6:
+            if not return_dict:
+                return (sample,)
+            return PeRFlowSchedulerOutput(prev_sample=sample, pred_original_sample=None)
+        
+        if self.config.prediction_type == "ddim_eps":
+            pred_epsilon = model_output
+            t_s, t_e, _, c_to_s, _, alphas_cumprod_start, alphas_cumprod_end = self.get_window_alpha(t_c)
+            
+            lambda_s = (alphas_cumprod_end / alphas_cumprod_start)**0.5
+            eta_s = (1-alphas_cumprod_end)**0.5 - (alphas_cumprod_end / alphas_cumprod_start * (1-alphas_cumprod_start))**0.5
+            
+            lambda_t = (lambda_s * (t_e - t_s)) / (lambda_s * (t_c - t_s) + (t_e - t_c))
+            eta_t = (eta_s * (t_e - t_c)) / (lambda_s * (t_c - t_s) + (t_e - t_c))
+            
+            pred_win_end = lambda_t * sample + eta_t * pred_epsilon
+            pred_velocity = (pred_win_end - sample) / (t_e - (t_s + c_to_s))
+            
+        elif self.config.prediction_type == "diff_eps":
+            pred_epsilon = model_output
+            t_s, t_e, _, c_to_s, gamma_s_e, _, _ = self.get_window_alpha(t_c)
+            
+            lambda_s = 1 / gamma_s_e
+            eta_s = -1 * (1 - gamma_s_e**2)**0.5 / gamma_s_e
+            
+            lambda_t = (lambda_s * (t_e - t_s)) / (lambda_s * (t_c - t_s) + (t_e - t_c))
+            eta_t = (eta_s * (t_e - t_c)) / (lambda_s * (t_c - t_s) + (t_e - t_c))
+            
+            pred_win_end = lambda_t * sample + eta_t * pred_epsilon
+            pred_velocity = (pred_win_end - sample) / (t_e - (t_s + c_to_s))
+
+        elif self.config.prediction_type == "velocity":
+            pred_velocity = model_output
+        else:
+            raise ValueError(
+                f"prediction_type given as {self.config.prediction_type} must be one of `ddim_eps`, `diff_eps`, or `velocity`."
+            )
+            
+        # get dt
+        idx = (self.timesteps == timestep).nonzero()
+        if len(idx) > 0:
+            idx = idx[0].item()
+            if (idx + 1) < len(self.timesteps):
+                prev_step = self.timesteps[idx + 1]
+            else:
+                prev_step = torch.tensor(0)
+        else:
+            # timestep not in timesteps list, use 0 as prev_step
+            prev_step = torch.tensor(0)
+        
+        dt = (prev_step - timestep) / self.config.num_train_timesteps
+        if isinstance(dt, torch.Tensor):
+            dt = dt.to(sample.device, sample.dtype)
+        else:
+            dt = torch.tensor(dt, device=sample.device, dtype=sample.dtype)
+
+        prev_sample = sample + dt * pred_velocity
+
+        if not return_dict:
+            return (prev_sample,)
+        return PeRFlowSchedulerOutput(prev_sample=prev_sample, pred_original_sample=None)
 
     def add_noise(
         self,
@@ -266,8 +452,23 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         Returns:
             `torch.FloatTensor`: The noisy samples.
         """
-        raise NotImplementedError("PeRFlowScheduler.add_noise is not implemented yet")
+        # Make sure alphas_cumprod and timestep have same device and dtype as original_samples
+        alphas_cumprod = self.alphas_cumprod.to(device=original_samples.device, dtype=original_samples.dtype)
+        timesteps = timesteps.to(original_samples.device) - 1  # indexing from 0
+
+        sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
+        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+        while len(sqrt_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+
+        sqrt_one_minus_alpha_prod = (1 - alphas_cumprod[timesteps]) ** 0.5
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+        while len(sqrt_one_minus_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+
+        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+        return noisy_samples
 
     def __len__(self):
         """Return the number of training timesteps."""
-        raise NotImplementedError("PeRFlowScheduler.__len__ is not implemented yet")
+        return self.config.num_train_timesteps

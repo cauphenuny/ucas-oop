@@ -37,6 +37,12 @@ class DummyUNet:
             ("conv_in.bias", torch.randn(320)),
             ("down_blocks.0.weight", torch.randn(320, 320, 3, 3)),
         ])
+        # Add config attribute for DreamBooth loading
+        self.config = {
+            "in_channels": 4,
+            "out_channels": 4,
+            "num_class_embeds": None,
+        }
     
     def state_dict(self):
         """Return state dict."""
@@ -51,9 +57,11 @@ class DummyPipeline:
     """Dummy pipeline for testing."""
     
     def __init__(self):
-        """Initialize with dummy UNet."""
+        """Initialize with dummy UNet, VAE, and text encoder."""
         self.unet = DummyUNet()
         self.vae = MagicMock()
+        self.vae.config = {}  # Add config for VAE
+        self.vae.load_state_dict = MagicMock()
         self.text_encoder = MagicMock()
 
 
@@ -189,9 +197,12 @@ class UtilsPerflowTest(unittest.TestCase):
         except (ValueError, FileNotFoundError, NotImplementedError, Exception):
             pass
 
+    @patch("diffusers.pipelines.stable_diffusion.convert_from_ckpt.convert_ldm_clip_checkpoint")
+    @patch("diffusers.pipelines.stable_diffusion.convert_from_ckpt.convert_ldm_vae_checkpoint")
+    @patch("diffusers.pipelines.stable_diffusion.convert_from_ckpt.convert_ldm_unet_checkpoint")
     @patch("diffusers.schedulers.utils_perflow.safe_open")
     @patch("os.path.exists")
-    def test_load_dreambooth_basic(self, mock_exists, mock_safe_open):
+    def test_load_dreambooth_basic(self, mock_exists, mock_safe_open, mock_convert_unet, mock_convert_vae, mock_convert_clip):
         """Test basic DreamBooth loading."""
         mock_exists.return_value = True
         
@@ -207,8 +218,18 @@ class UtilsPerflowTest(unittest.TestCase):
         mock_file.get_tensor.side_effect = lambda k: state_dict[k]
         mock_safe_open.return_value.__enter__.return_value = mock_file
         
+        # Mock the conversion functions to return the state dicts
+        mock_convert_unet.return_value = pipe.unet.state_dict()
+        mock_convert_vae.return_value = {}
+        mock_convert_clip.return_value = pipe.text_encoder
+        
         result_pipe = load_dreambooth_into_pipeline(pipe, sd_dreambooth)
         assert result_pipe is not None
+        
+        # Verify conversion functions were called
+        mock_convert_unet.assert_called_once()
+        mock_convert_vae.assert_called_once()
+        mock_convert_clip.assert_called_once()
 
     def test_load_dreambooth_invalid_extension(self):
         """Test load_dreambooth_into_pipeline with invalid file extension."""
