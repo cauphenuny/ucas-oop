@@ -5,3 +5,5 @@ __pycache__/
 *.pyo
 *.pyd
 models/
+# Exclude compiled PDF files from typst
+Project/docs/raw/**/*.pdf
