@@ -4,3 +4,6 @@
 [submodule "Project/VideoX-Fun"]
 	path = Project/VideoX-Fun
 	url = https://github.com/aigc-apps/VideoX-Fun
+[submodule "Project/PeRFlow"]
+	path = Project/PeRFlow
+	url = https://github.com/magic-research/piecewise-rectified-flow
