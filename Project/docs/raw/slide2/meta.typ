@@ -3,8 +3,8 @@
 // #let pagebreak(..args) = {}
 
 #let meta = (
-  title: [设计模式优化与重构],
-  slide-title: [设计模式优化与重构: Diffusers],
+  title: [大作业报告],
+  slide-title: [Diffusers重构与扩展],
   subtitle: [],
   author: [袁晨圃],
   course: [OOP],

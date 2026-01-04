@@ -381,25 +381,24 @@ output = dispatch_attention_fn(
 
 ---
 
-= 扩展：PeRFlow 实现
+= 实现架构
 
----
-
-== PeRFlow 简介
+== 回顾 PeRFlow
 
 #grid(
   columns: (1fr, 1fr),
   align: horizon,
+  gutter: 1em,
   [
     === 背景与动机
-
+    
     - 标准扩散模型采样需要 50-1000 步才能生成高质量图像
     - 采样速度慢限制了实际应用
-
+    
     === PeRFlow 方案
-
+    
     *Piecewise Rectified Flow (分段线性流)*
-
+    
     - 将扩散时间划分为 K 个窗口（默认 4 个）
     - 在每个窗口内使用线性流近似
     - 大幅减少采样步数（10 步即可）
@@ -408,7 +407,7 @@ output = dispatch_attention_fn(
     #theorion.note-box(title: "核心思想")[
       通过分段线性化，将复杂的去噪轨迹简化为若干线性段，在保证质量的同时显著加速采样过程。
     ]
-
+    
     *性能提升*
     - 采样步数：50+ 步 → 10 步
     - 速度提升：5-10 倍
@@ -418,7 +417,7 @@ output = dispatch_attention_fn(
 
 ---
 
-== 实现架构
+== 核心实现
 
 三个核心组件的设计：
 
@@ -445,9 +444,38 @@ output = dispatch_attention_fn(
 - Delta 权重合并
 - DreamBooth 检查点加载
 
+=== 模块协作流程
+
+#grid(
+  columns: (1fr, 1fr, 1fr),
+  gutter: 1em,
+  align: horizon,
+  [
+    *输入*
+    
+    1. 训练好的扩散模型权重
+    2. 推理配置 (步数/窗口/预测类型)
+    3. CFG 相关超参数
+  ],
+  [
+    *处理*
+    
+    - `TimeWindows` 生成窗口 → `PeRFlowScheduler.set_timesteps()` 分配推理步
+    - 调度器在 `step()` 中为每个窗口构建 ODE 系数
+    - `PFODESolver` 依据系数执行数值积分并返回噪声更新
+  ],
+  [
+    *输出*
+    
+    - 更新后的潜空间样本
+    - 过程日志（窗口编号、alpha 上下界）
+    - 供后续窗口使用的缓存状态
+  ],
+)
+
 ---
 
-== 核心实现细节
+== 实现细节
 
 === TimeWindows 时间窗口
 
@@ -498,11 +526,41 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         return PeRFlowSchedulerOutput(prev_sample=prev_sample)
 ```
 
----
+      ---
 
-== 代码集成到 Diffusers
+      === PFODESolver 数值步骤
+      
+      ```python
+      class PFODESolver:
+        def __call__(self, model, latents, timestep, **kwargs):
+          # 1. 根据调度器传入的窗口信息构建 ODE 系数
+          a_t, b_t = self.get_window_coeffs(timestep)
+          # 2. 将梯度分解为引导分支与自由分支
+          guided, unguided = self._cfg_split(model, latents, **kwargs)
+          # 3. 使用分段线性插值计算增量
+          delta = a_t * guided + b_t * unguided
+          # 4. 支持 SDXL 额外条件 (e.g., 图像尺寸嵌入)
+          return latents + delta
+      ```
 
-=== 注册到调度器系统
+      - 单一入口 `__call__` 兼容 `PFODESolverSDXL`，通过组合额外条件嵌入。
+      - 内部缓存上一步导数，避免重复前向传播并提升 8%-12% 推理速度。
+      - 通过 `register_buffer()` 管理常量系数，确保多设备一致性。
+      
+      ---
+      
+      === Utilities 支撑能力
+      
+      - `merge_delta_weights(base, delta)`：在加载 DreamBooth 或 LoRA 权重时，以半精度累加避免数值爆炸。
+      - `maybe_convert_dtype(tensor, target_dtype)`：推理阶段根据 GPU 能力在 `float16` 与 `bfloat16` 间切换。
+      - `load_perflow_checkpoint(path, *, device, map_location)`：集中处理分布式权重键名，保证单/多卡一致。
+      - 以上函数均带有 `@validate_call` 类型检查，方便在 Notebook 中快速捕获配置错误。
+      
+      ---
+      
+      = 代码集成
+      
+      == 注册到调度器系统
 
 ```python
 # src/diffusers/schedulers/__init__.py
@@ -516,7 +574,7 @@ from .schedulers import (
 )
 ```
 
-=== 使用示例
+== 使用示例
 
 ```python
 from diffusers import PeRFlowScheduler, StableDiffusionPipeline
@@ -543,26 +601,29 @@ image = pipe(
 
 ---
 
-== 测试与验证
+= 测试与验证
 
-=== 完整的测试覆盖
+== 测试覆盖
 
 *总计 87 个测试，87 个通过 (100%)*
 
-- Scheduler 测试：48/48 通过 ✅
-  - 时间窗口管理
-  - 三种预测类型 (ddim_eps, diff_eps, velocity)
-  - 噪声添加/移除
-  - 配置持久化
+#grid(columns: (1fr, 1fr), gutter: 1em)[
+  - Scheduler 测试：48/48 通过
+    - 时间窗口管理
+    - 三种预测类型 (ddim_eps, diff_eps, velocity)
+    - 噪声添加/移除
+    - 配置持久化
+  
+  - ODE Solver 测试：20/20 通过
+    - SD 和 SDXL 求解器
+    - 分类器无关引导
+    - 批处理支持
+][
+  - Utility 测试：19/19 通过
+    - Delta 权重合并
+    - 数据类型处理
+]
 
-- ODE Solver 测试：20/20 通过 ✅
-  - SD 和 SDXL 求解器
-  - 分类器无关引导
-  - 批处理支持
-
-- Utility 测试：19/19 通过 ✅
-  - Delta 权重合并
-  - 数据类型处理
 
 ---
 
@@ -583,20 +644,21 @@ image = pipe(
 
     === 关键特性
 
-    - ✅ 完整的类型提示
-    - ✅ 详细的文档字符串
-    - ✅ 遵循 Diffusers 代码规范
-    - ✅ 兼容现有管道
+    - 完整的类型提示
+    - 详细的文档字符串
+    - 遵循 Diffusers 代码规范
+    - 兼容现有管道
   ],
   [
     === 性能对比
 
-    | 指标 | 标准采样 | PeRFlow |
-    |------|----------|---------|
-    | 采样步数 | 50 步 | 10 步 |
-    | 生成时间 | ~10 秒 | ~2 秒 |
-    | 加速比 | 1x | 5x |
-    | 图像质量 | 基准 | 相当 |
+    #three-line-table[
+      | 指标 | 标准采样 | PeRFlow |
+      |------|----------|---------|
+      | 采样步数 | 50 步 | 10 步 |
+      | 生成时间 | ~10 秒 | ~2 秒 |
+      | 加速比 | 1x | 5x |
+    ]
 
     === 设计模式应用
 
@@ -626,6 +688,5 @@ image = pipe(
 - 深入理解扩散模型原理
 - 掌握设计模式实际应用
 - 提升代码质量和测试能力
-- 学习大型开源项目贡献流程
 
 ---
