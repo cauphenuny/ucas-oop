@@ -1,0 +1,42 @@
+@startuml
+class PipelineValidationError {
+    +Exception
+}
+
+class DiffusionPipelineBuilder {
+    -base_repo: Optional[Union[str, os.PathLike]]
+    -torch_dtype: Optional[torch.dtype]
+    -device: Optional[Union[str, torch.device]]
+    -components: Dict[str, Any]
+    -config_overrides: Dict[str, Any]
+    -component_flags: Dict[str, Dict[str, Any]]
+    -hooks: Dict[str, List[Callable]]
+    -validators: List[Callable]
+    -presets: Dict[str, Callable]
+    
+    +__init__(base_repo, torch_dtype, device)
+    +_register_default_presets()
+    +from_pretrained(pretrained_model_name_or_path, **kwargs): DiffusionPipelineBuilder
+    +with_component(name, component, freeze, requires_grad, **flags): DiffusionPipelineBuilder
+    +with_unet(unet, **flags): DiffusionPipelineBuilder
+    +with_vae(vae, **flags): DiffusionPipelineBuilder
+    +with_scheduler(scheduler, **flags): DiffusionPipelineBuilder
+    +with_text_encoder(text_encoder, **flags): DiffusionPipelineBuilder
+    +with_tokenizer(tokenizer, **flags): DiffusionPipelineBuilder
+    +with_feature_extractor(feature_extractor, **flags): DiffusionPipelineBuilder
+    +with_safety_checker(safety_checker, **flags): DiffusionPipelineBuilder
+    +with_image_encoder(image_encoder, **flags): DiffusionPipelineBuilder
+    +with_controlnet(controlnet, **flags): DiffusionPipelineBuilder
+    +with_adapter(adapter, **flags): DiffusionPipelineBuilder
+    +apply_preset(name, **kwargs): DiffusionPipelineBuilder
+    +with_config_override(**kwargs): DiffusionPipelineBuilder
+    +register_validator(validator): DiffusionPipelineBuilder
+    +add_hook(stage, hook): DiffusionPipelineBuilder
+    +validate(): None
+    +build(pipeline_cls, export_modules, lazy): Union[DiffusionPipeline, Dict[str, Any], tuple]
+    +clone(**overrides): DiffusionPipelineBuilder
+}
+
+DiffusionPipelineBuilder --> PipelineValidationError : raises
+DiffusionPipelineBuilder --> DiffusionPipeline : builds
+@enduml

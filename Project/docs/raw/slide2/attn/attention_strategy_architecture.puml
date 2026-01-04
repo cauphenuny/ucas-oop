@@ -1,0 +1,92 @@
+@startuml Attention Strategy Pattern - Architecture Overview
+
+!theme plain
+
+skinparam component {
+    BackgroundColor<<Strategy>> LightBlue
+    BackgroundColor<<Factory>> LightYellow
+    BackgroundColor<<Cache>> LightGreen
+    BackgroundColor<<Legacy>> LightGray
+    BorderColor Black
+}
+
+package "Strategy Pattern Core" {
+    [AttentionStrategy\n<<Abstract Base>>] <<Strategy>>
+    
+    package "Concrete Strategies" {
+        [FlashAttentionStrategy] <<Strategy>>
+        [NativeAttentionStrategy] <<Strategy>>
+        [XFormersAttentionStrategy] <<Strategy>>
+    }
+    
+    [AttentionStrategyFactory] <<Factory>>
+}
+
+package "Performance Layer" {
+    [Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] <<Cache>>
+}
+
+package "Backward Compatibility Layer" {
+    [_flash_attention()] <<Legacy>>
+    [_native_attention()] <<Legacy>>
+    [_xformers_attention()] <<Legacy>>
+}
+
+package "Existing Infrastructure" {
+    [_AttentionBackendRegistry] <<Legacy>>
+    [dispatch_attention_fn()] <<Legacy>>
+}
+
+package "External Libraries" {
+    [flash_attn_func\nPyTorch\nxFormers] as Libraries
+}
+
+' Relationships
+[AttentionStrategy\n<<Abstract Base>>] <|.. [FlashAttentionStrategy]
+[AttentionStrategy\n<<Abstract Base>>] <|.. [NativeAttentionStrategy]
+[AttentionStrategy\n<<Abstract Base>>] <|.. [XFormersAttentionStrategy]
+
+[AttentionStrategyFactory] ..> [FlashAttentionStrategy] : creates & caches
+[AttentionStrategyFactory] ..> [NativeAttentionStrategy] : creates & caches
+[AttentionStrategyFactory] ..> [XFormersAttentionStrategy] : creates & caches
+
+[Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] *-- [FlashAttentionStrategy]
+[Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] *-- [NativeAttentionStrategy]
+[Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] *-- [XFormersAttentionStrategy]
+
+[_flash_attention()] ..> [Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] : uses
+[_native_attention()] ..> [Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] : uses
+[_xformers_attention()] ..> [Module-Level Cache\n_flash_attention_strategy\n_native_attention_strategy\n_xformers_attention_strategy] : uses
+
+[_AttentionBackendRegistry] o-- [_flash_attention()]
+[_AttentionBackendRegistry] o-- [_native_attention()]
+[_AttentionBackendRegistry] o-- [_xformers_attention()]
+
+[dispatch_attention_fn()] ..> [_AttentionBackendRegistry] : uses
+
+[FlashAttentionStrategy] ..> Libraries : delegates
+[NativeAttentionStrategy] ..> Libraries : delegates
+[XFormersAttentionStrategy] ..> Libraries : delegates
+
+note top of "Strategy Pattern Core"
+    **New Design**
+    • Clean separation of concerns
+    • Easy to extend with new backends
+    • SOLID principles applied
+end note
+
+note top of "Performance Layer"
+    **Zero Overhead**
+    • Pre-instantiated strategies
+    • No allocation on hot path
+    • Singleton-like behavior
+end note
+
+note top of "Backward Compatibility Layer"
+    **No Breaking Changes**
+    • Existing API preserved
+    • Internal delegation to strategies
+    • Registered with existing system
+end note
+
+@enduml

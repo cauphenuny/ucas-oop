@@ -1,0 +1,382 @@
+#show emph: text.with(font: ("New Computer Modern", "STKaiti"))
+#set text(font: ("Libertinus Serif", "Songti SC"), lang: "zh")
+#show emph: text.with(font: ("Libertinus Serif", "STKaiti"))
+#import "@preview/theorion:0.4.1"
+#import "@preview/tablem:0.3.0": *
+#import "@preview/codly:1.3.0": *
+#import "@preview/codly-languages:0.1.10": *
+
+
+#import "meta.typ": *
+#import "@preview/touying:0.6.1": *
+#import "@preview/numbly:0.1.0": *
+
+#show: doc => {
+  // import themes.university: *
+  // import themes.metropolis: *
+  import themes.dewdrop: *
+  show: dewdrop-theme.with(
+    aspect-ratio: "16-9",
+    footer: self => grid(
+      columns: (1fr, 1fr, 1fr),
+      align: center + horizon,
+      self.info.author, self.info.title, self.info.date.display(),
+    ),
+    navigation: "mini-slides",
+    config-info(
+      title: meta.slide-title,
+      subtitle: meta.subtitle,
+      date: meta.date,
+      author: meta.author,
+    ),
+  )
+  // show: university-theme.with(
+  //   aspect-ratio: "16-9",
+  //   footer: self => grid(
+  //     columns: (1fr, 1fr, 1fr),
+  //     align: center + horizon,
+  //     self.info.author,
+  //     self.info.title,
+  //     self.info.date.display(),
+  //     ),
+  //   config-info(
+  //     title: meta.slide-title,
+  //     subtitle: meta.subtitle,
+  //   )
+  // )
+  // show: metropolis-theme.with(
+  //   aspect-ratio: "16-9",
+  //   footer: self => grid(
+  //     columns: (1fr, 1fr, 1fr),
+  //     align: center + horizon,
+  //     self.info.author,
+  //     self.info.title,
+  //     self.info.date.display(),
+  //     ),
+  //   config-info(
+  //     title: meta.slide-title,
+  //     subtitle: meta.subtitle,
+  //     author: meta.author,
+  //     date: meta.date,
+  //     institution: meta.institution,
+  //     logo: none,
+  //   ),
+  // )
+  show: text.with(size: 0.90em)
+  show: codly-init.with()
+  show raw.where(block: true): text.with(size: 0.8em)
+
+  set heading(numbering: numbly("{1:一}、", default: "1.1  "))
+
+  title-slide()
+  doc
+  focus-slide[
+    Thanks!
+  ]
+}
+
+= 缺陷诊断
+
+---
+
+== 利用大模型发现问题
+
+#grid(
+  columns: (1fr, 4fr),
+  align: horizon,
+  [
+    与 Deep-Wiki 多轮对话，\
+    整理成重构文档
+  ],
+  [
+    #figure(image("deepwiki.png", width: 60%), caption: "对话截图")
+  ],
+)
+
+---
+
+文档节选：
+
+#let md-doc = read("attn-demo.md")
+
+#[
+  #show: text.with(size: 0.7em)
+  #raw(md-doc, lang: "markdown")
+]
+
+---
+
+= 重构采用的设计模式介绍
+
+---
+
+== 建造者模式 (Builder Pattern)
+
+#grid(
+  columns: (1fr, 1em, 1fr),
+  align: horizon,
+  [
+    #theorion.note-box(title: "建造者模式")[
+      将一个复杂对象的构建与它的表示分离，使得同样的构建过程可以创建不同的表示。
+    ]
+
+    === 引入
+
+    假设有这样一个复杂对象， 在对其进行构造时需要构造众多成员变量和嵌套对象。 这些初始化代码通常深藏于一个包含众多参数的构造函数中，且散落在客户端代码的多个位置。
+  ],
+  [
+  ],
+  [
+    #figure(image("image.png"), caption: "一个有复杂构造函数的 House 类")
+  ],
+)
+
+---
+
+#grid(
+  columns: (1fr, 1em, 1fr),
+  align: horizon,
+  [
+    *建造者模式的解决方案*
+
+    将对象构造代码从产品类中抽取出来， 并将其放在一个名为 _建造者_ 的独立对象中。
+
+    将对象构造过程划分为一组步骤， 比如 `build­Walls` 创建墙壁和 `build­Door` 创建房门等。 每次创建对象时， 都需要通过建造者对象执行一系列步骤。 重点在于无需调用所有步骤， 而只需调用创建特定对象配置所需的那些步骤即可。
+
+  ],
+  [],
+  [
+    #figure(image("image-1.png"), caption: "建造者：HouseBuilder")
+  ],
+)
+
+---
+
+=== 在代码中的应用
+
+统一 `DiffusionPipeline` 各组件的构建过程，解决训练脚本中的代码重复和不一致问题。
+
+核心类：`DiffusionPipelineBuilder`，提供链式配置和组件管理
+
+`DiffusionPipelineBuilder` 提供一些方法：
+
+- `from_pretrained()`, `add_component()`, `with_vae()`, `with_text_encoder()` 等用于灵活配置和构建不同的扩散管道。
+
+- `build()` 方法根据配置组装并返回最终的 `DiffusionPipeline` 实例或者组件 `dict`。
+
+---
+
+== 策略模式 (Strategy Pattern)
+
+=== 模式介绍
+
+#grid(
+  columns: (1fr, 1em, 1fr),
+  align: horizon,
+  [
+    #theorion.note-box(title: "策略模式")[
+      定义一系列算法， 将每个算法封装起来， 并使它们可以互换。 策略模式让算法独立于使用它的客户而变化。
+    ]
+
+    - 完成一项任务，往往可以有多种不同的方式，每一种方式称为一个策略，我们可以根据环境或者条件的不同选择不同的策略来完成该项任务。
+
+  ],
+  [],
+  [
+    #figure(image("image-2.png"), caption: "一些路径规划策略")
+  ],
+)
+---
+
+策略模式建议找出负责用许多不同方式完成特定任务的类， 然后将其中的算法抽取到一组被称为策略的独立类中。
+
+名为上下文的原始类必须包含一个成员变量来存储对于每种策略的引用。 上下文并不执行任务， 而是将工作委派给已连接的策略对象。
+
+上下文不负责选择符合任务需要的算法——客户端会将所需策略传递给上下文。 实际上， 上下文并不十分了解策略， 它会通过同样的通用接口与所有策略进行交互， 而该接口只需暴露一个方法来触发所选策略中封装的算法即可。
+
+因此， 上下文可独立于具体策略。 这样你就可在不修改上下文代码或其他策略的情况下添加新算法或修改已有算法了。
+
+---
+
+=== 重构中的应用
+
+==== 问题背景
+
+Diffusers 库支持多种 attention 后端（如 FlashAttention、xFormers、PyTorch 原生等），用于优化不同硬件上的性能。但原始实现存在一些问题：
+
+- 扩展困难：新增后端需修改多处代码（如枚举、注册、检查函数）。
+- 维护复杂：函数式实现难以测试和调试。
+- 类型不安全：缺乏抽象接口，易出错。
+
+---
+
+目前原有的实现是基于注册表模式管理后端
+
+```python
+@_AttentionBackendRegistry.register(AttentionBackendName.FLASH)
+def _flash_attention(query, key, value, **kwargs):
+    return flash_attn_func(q=query, k=key, v=value, **kwargs)
+```
+
+这个 `_AttentionBackendRegistry.register` 装饰器会在全局的注册表中将后端名称映射到对应的函数。
+
+---
+
+引入抽象策略接口，将函数式实现转换为类结构
+
+- 抽象策略接口：`AttentionStrategy` 基类
+- 具体策略类：`FlashAttentionStrategy`、`XFormersAttentionStrategy` 等，封装各自的实现细节
+- 工厂模式：`AttentionStrategyFactory` 根据名称实例化对应策略类
+- 约束检查：共同的检查移到基类
+
+```python
+class AttentionStrategy(ABC):
+    @abstractmethod
+    def compute_attention(self, query, key, value, **kwargs):
+        pass
+
+class FlashAttentionStrategy(AttentionStrategy):
+    def compute_attention(self, query, key, value, **kwargs):
+        return flash_attn_func(q=query, k=key, v=value, **kwargs)
+```
+
+---
+
+= 重构过程以及效果
+
+---
+
+== 重构过程
+
+=== 构造单元测试
+
+测试驱动开发 (TDD) 思想，先编写测试用例，再进行重构
+
+减少大模型重构过程中可能发生的错误
+
+```python
+def test_config_override():
+    """测试配置覆盖"""
+    print("\n测试 5: 配置覆盖")
+    print("-" * 50)
+
+    try:
+        builder = DiffusionPipelineBuilder()
+
+        # 设置配置
+        builder.with_config_override(
+            guidance_scale=7.5,
+            num_inference_steps=50
+        )
+
+        if "guidance_scale" in builder.config_overrides and "num_inference_steps" in builder.config_overrides:
+            print(f"✓ 配置覆盖成功")
+            print(f"  - guidance_scale: {builder.config_overrides['guidance_scale']}")
+            print(f"  - num_inference_steps: {builder.config_overrides['num_inference_steps']}")
+            return True
+        else:
+            print(f"配置未正确设置")
+            return False
+    except Exception as e:
+        print(f"测试失败: {e}")
+        return False
+```
+
+---
+
+#grid(
+  columns: (2fr, 4fr),
+  [
+    === 大模型辅助重构
+
+    整理设计文档，结合代码库当作上下文
+  ],
+  [
+    #figure(image("image-3.png", width: 80%), caption: "Coding Agent")
+  ],
+)
+
+---
+
+== 效果展示
+
+=== Builder
+
+#figure(image("image-7.png", width: 30%), caption: "Builder 类图")
+
+---
+
+#grid(
+  columns: (1fr, 1fr),
+  [
+    传统方式 (train_text_to_image.py)
+
+    ```python
+    # 需要 8+ 行重复代码
+    noise_scheduler = DDPMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="scheduler"
+    )
+    tokenizer = CLIPTokenizer.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
+    )
+    text_encoder = CLIPTextModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant
+    )
+    vae = AutoencoderKL.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
+    )
+    unet = UNet2DConditionModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
+    )
+
+    # 手动冻结组件
+    vae.requires_grad_(False)
+    text_encoder.requires_grad_(False)
+    ```
+  ],
+  [
+    Builder 方式
+
+    ```python
+    # 只需 4 行代码
+    builder = DiffusionPipelineBuilder.from_pretrained(
+        args.pretrained_model_name_or_path,
+        revision=args.revision,
+        variant=args.variant,
+    )
+
+    # 链式配置和冻结
+    builder.with_vae(builder.components["vae"], freeze=True)
+    builder.with_text_encoder(builder.components["text_encoder"], freeze=True)
+
+    # 构造时传递参数
+    builder.with_scheduler(DDIMScheduler, num_train_timesteps=1000)
+
+    pipe = builder.build()
+    ```
+  ],
+)
+
+=== Attention Strategy
+
+#figure(image("image-8.png", width: 70%), caption: "Attention Strategy 类图")
+
+#figure(image("image-10.png", width: 70%), caption: "执行过程")
+
+---
+
+使用示例
+
+```python
+# 内部使用策略模式
+# 自动选择合适的 attention 后端
+from diffusers.models.attention_dispatch import dispatch_attention_fn
+
+# 根据硬件和配置自动选择策略
+output = dispatch_attention_fn(
+    backend="FLASH",  # 或 "XFORMERS", "NATIVE"
+    query=query, key=key, value=value
+)
+```
+
+---
