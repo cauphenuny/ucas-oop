@@ -361,9 +361,15 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
                 If return_dict is `True`, [`~schedulers.scheduling_perflow.PeRFlowSchedulerOutput`] is returned,
                 otherwise a tuple is returned where the first element is the sample tensor.
         """
+        # Handle edge case: if at or very close to terminal timestep, return sample as-is
+        t_c = timestep / self.config.num_train_timesteps
+        if t_c <= self.config.t_clean + 1e-6:
+            if not return_dict:
+                return (sample,)
+            return PeRFlowSchedulerOutput(prev_sample=sample, pred_original_sample=None)
+        
         if self.config.prediction_type == "ddim_eps":
             pred_epsilon = model_output
-            t_c = timestep / self.config.num_train_timesteps
             t_s, t_e, _, c_to_s, _, alphas_cumprod_start, alphas_cumprod_end = self.get_window_alpha(t_c)
             
             lambda_s = (alphas_cumprod_end / alphas_cumprod_start)**0.5

@@ -171,7 +171,7 @@ class PFODESolver:
 
                 # compute predicted original sample from predicted noise also called
                 # "predicted x_0" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
-                if self.scheduler.config.prediction_type == "epsilon":
+                if self.scheduler.config.prediction_type in ["epsilon", "ddim_eps", "diff_eps"]:
                     pred_original_sample = (latents - beta_prod_t[:, None, None, None] ** 0.5 * noise_pred) / alpha_prod_t[:, None, None, None] ** 0.5
                     pred_epsilon = noise_pred
                 elif self.scheduler.config.prediction_type == "v_prediction":
@@ -179,7 +179,7 @@ class PFODESolver:
                     pred_epsilon = (alpha_prod_t[:, None, None, None]**0.5) * noise_pred + (beta_prod_t[:, None, None, None]**0.5) * latents
                 else:
                     raise ValueError(
-                        f"prediction_type given as {self.scheduler.config.prediction_type} must be one of `epsilon`, `sample`, or"
+                        f"prediction_type given as {self.scheduler.config.prediction_type} must be one of `epsilon`, `ddim_eps`, `diff_eps`, or"
                         " `v_prediction`"
                     )
                     
@@ -387,13 +387,12 @@ class PFODESolverSDXL:
 
                 # compute predicted original sample from predicted noise also called
                 # "predicted x_0" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
-                if self.scheduler.config.prediction_type == "epsilon":
+                if self.scheduler.config.prediction_type in ["epsilon", "ddim_eps", "diff_eps"]:
                     pred_original_sample = (latents - beta_prod_t[:, None, None, None] ** 0.5 * noise_pred) / alpha_prod_t[:, None, None, None] ** 0.5
                     pred_epsilon = noise_pred
                 else:
                     raise ValueError(
-                        f"prediction_type given as {self.scheduler.config.prediction_type} must be one of `epsilon`, `sample`, or"
-                        " `v_prediction`"
+                        f"prediction_type given as {self.scheduler.config.prediction_type} must be one of `epsilon`, `ddim_eps`, `diff_eps`"
                     )
                     
                 pred_sample_direction = (1 - alpha_prod_t_prev[:, None, None, None]) ** 0.5 * pred_epsilon
