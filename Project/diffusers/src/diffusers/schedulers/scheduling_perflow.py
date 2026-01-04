@@ -62,10 +62,19 @@ class TimeWindows:
         Returns:
             `Tuple[float, float]`: A tuple of (window_start, window_end).
         """
+        # Convert tensor to float if needed
+        if isinstance(tp, torch.Tensor):
+            tp = tp.item()
+            
         idx = 0
         # robust to numerical error; e.g, (0.6+1/10000) belongs to [0.6, 0.3)
-        while (tp - 0.1 * self.precision) <= self.window_ends[idx]:
+        while idx < len(self.window_ends) and (tp - 0.1 * self.precision) <= self.window_ends[idx]:
             idx += 1
+        
+        # Handle edge case: if we've gone past all windows, use the last window
+        if idx >= len(self.window_starts):
+            idx = len(self.window_starts) - 1
+            
         return self.window_starts[idx], self.window_ends[idx]
     
     def lookup_window(self, timepoint: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
@@ -307,6 +316,10 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         time_windows = self.time_windows
         num_train_timesteps = self.config.num_train_timesteps
         
+        # Convert to tensor if needed
+        if not isinstance(timepoints, torch.Tensor):
+            timepoints = torch.tensor(timepoints, dtype=torch.float32)
+        
         t_win_start, t_win_end = time_windows.lookup_window(timepoints)
         t_win_len = t_win_end - t_win_start
         t_interval = timepoints - t_win_start  # NOTE: negative value
@@ -384,10 +397,22 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
             )
             
         # get dt
-        idx = torch.argwhere(torch.where(self.timesteps == timestep, 1, 0))
-        prev_step = self.timesteps[idx+1] if (idx+1) < len(self.timesteps) else 0
+        idx = (self.timesteps == timestep).nonzero()
+        if len(idx) > 0:
+            idx = idx[0].item()
+            if (idx + 1) < len(self.timesteps):
+                prev_step = self.timesteps[idx + 1]
+            else:
+                prev_step = torch.tensor(0)
+        else:
+            # timestep not in timesteps list, use 0 as prev_step
+            prev_step = torch.tensor(0)
+        
         dt = (prev_step - timestep) / self.config.num_train_timesteps
-        dt = dt.to(sample.device, sample.dtype)
+        if isinstance(dt, torch.Tensor):
+            dt = dt.to(sample.device, sample.dtype)
+        else:
+            dt = torch.tensor(dt, device=sample.device, dtype=sample.dtype)
 
         prev_sample = sample + dt * pred_velocity
 
