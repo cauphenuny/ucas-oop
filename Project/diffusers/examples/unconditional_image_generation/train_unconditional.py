@@ -724,7 +724,17 @@ def main(args):
                     scheduler=noise_scheduler,
                 )
 
-                generator = torch.Generator(device=pipeline.device).manual_seed(0)
+                # Recreate scheduler on CPU to avoid MPS tensor/device mismatches during sampling
+                pipeline.scheduler = pipeline.scheduler.__class__.from_config(pipeline.scheduler.config)
+
+                # Use CPU for pipeline inference to avoid MPS device issues on macOS
+                # MPS has issues with random tensor allocation in some PyTorch versions
+                inference_device = "cpu"
+                if torch.cuda.is_available() and str(pipeline.device) != "mps":
+                    inference_device = pipeline.device
+                
+                pipeline = pipeline.to(inference_device)
+                generator = torch.Generator(device=inference_device).manual_seed(0)
                 # run pipeline in inference (sample random noise and denoise)
                 images = pipeline(
                     generator=generator,
@@ -735,6 +745,9 @@ def main(args):
 
                 if args.use_ema:
                     ema_model.restore(unet.parameters())
+
+                # Move pipeline back to accelerator device for safety
+                pipeline = pipeline.to(accelerator.device)
 
                 # denormalize the images and save to tensorboard
                 images_processed = (images * 255).round().astype("uint8")

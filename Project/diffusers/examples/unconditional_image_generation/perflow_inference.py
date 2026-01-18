@@ -35,7 +35,16 @@ def _maybe_sync():
 
 
 def _run_pipeline(pipe: DDPMPipeline, num_images: int, num_steps: int, seed: int) -> tuple[list[Image.Image], float]:
-    generator = torch.Generator(device=pipe.device).manual_seed(seed)
+    # Use CPU for inference to avoid MPS device issues on macOS
+    original_device = pipe.device
+    # Recreate scheduler on CPU to keep tensors aligned
+    pipe.scheduler = pipe.scheduler.__class__.from_config(pipe.scheduler.config)
+    inference_device = "cpu"
+    if torch.cuda.is_available() and str(pipe.device) != "mps":
+        inference_device = pipe.device
+
+    pipe = pipe.to(inference_device)
+    generator = torch.Generator(device=inference_device).manual_seed(seed)
     _maybe_sync()
     start = time.perf_counter()
     result = pipe(
@@ -45,7 +54,11 @@ def _run_pipeline(pipe: DDPMPipeline, num_images: int, num_steps: int, seed: int
         output_type="pil",
     )
     _maybe_sync()
-    return result.images, time.perf_counter() - start
+    elapsed = time.perf_counter() - start
+    
+    # Move back to original device
+    pipe = pipe.to(original_device)
+    return result.images, elapsed
 
 
 def main():
