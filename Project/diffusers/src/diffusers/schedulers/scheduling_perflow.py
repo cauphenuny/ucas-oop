@@ -348,6 +348,8 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
         timestep: int,
         sample: torch.FloatTensor,
         return_dict: bool = True,
+        generator: Optional[torch.Generator] = None,
+        **kwargs,
     ) -> Union[PeRFlowSchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion
@@ -362,6 +364,10 @@ class PeRFlowScheduler(SchedulerMixin, ConfigMixin):
                 A current instance of a sample created by the diffusion process.
             return_dict (`bool`, *optional*, defaults to `True`):
                 Whether or not to return a [`~schedulers.scheduling_perflow.PeRFlowSchedulerOutput`] or `tuple`.
+            generator (`torch.Generator`, *optional*):
+                Not used. Included for API compatibility with schedulers that accept a generator.
+            **kwargs:
+                Additional arguments are ignored for API compatibility.
 
         Returns:
             [`~schedulers.scheduling_utils.PeRFlowSchedulerOutput`] or `tuple`:
