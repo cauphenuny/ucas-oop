@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import shutil
+from collections import OrderedDict
 from datetime import timedelta
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_accelerate_version, is_tensorboard_available, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
+from safetensors.torch import save_file
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -93,6 +95,15 @@ def parse_args():
         type=str,
         default=None,
         help="The config of the UNet model to train, leave as None to use standard DDPM configuration.",
+    )
+    parser.add_argument(
+        "--pretrained_model_path",
+        type=str,
+        default=None,
+        help=(
+            "Optional path or repo id to a pretrained DDPMPipeline to start from. Required when saving delta weights"
+            " for PeRFlow inference."
+        ),
     )
     parser.add_argument(
         "--train_data_dir",
@@ -283,6 +294,17 @@ def parse_args():
         action="store_true",
         help="Preserve 16/32-bit image precision by avoiding 8-bit RGB conversion while still producing 3-channel tensors.",
     )
+    parser.add_argument(
+        "--perflow_save_delta",
+        action="store_true",
+        help="Save delta weights (trained - base) for use with PeRFlow accelerated inference.",
+    )
+    parser.add_argument(
+        "--perflow_delta_output",
+        type=str,
+        default=None,
+        help="Where to save delta_weights.safetensors. Defaults to <output_dir>/delta_weights.safetensors",
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -291,6 +313,9 @@ def parse_args():
 
     if args.dataset_name is None and args.train_data_dir is None:
         raise ValueError("You must specify either a dataset name from the hub or a train data directory.")
+
+    if args.perflow_save_delta and args.pretrained_model_path is None:
+        raise ValueError("--pretrained_model_path is required when --perflow_save_delta is set.")
 
     return args
 
@@ -377,7 +402,15 @@ def main(args):
             ).repo_id
 
     # Initialize the model
-    if args.model_config_name_or_path is None:
+    base_unet_state = None
+    pipeline_scheduler = None
+    if args.pretrained_model_path is not None:
+        pipe = DDPMPipeline.from_pretrained(args.pretrained_model_path)
+        model = pipe.unet
+        pipeline_scheduler = pipe.scheduler
+        if args.perflow_save_delta:
+            base_unet_state = {k: v.detach().clone().cpu() for k, v in model.state_dict().items()}
+    elif args.model_config_name_or_path is None:
         model = UNet2DModel(
             sample_size=args.resolution,
             in_channels=3,
@@ -440,7 +473,11 @@ def main(args):
 
     # Initialize the scheduler
     accepts_prediction_type = "prediction_type" in set(inspect.signature(DDPMScheduler.__init__).parameters.keys())
-    if accepts_prediction_type:
+    if pipeline_scheduler is not None:
+        noise_scheduler = pipeline_scheduler
+        if accepts_prediction_type:
+            noise_scheduler.config.prediction_type = args.prediction_type
+    elif accepts_prediction_type:
         noise_scheduler = DDPMScheduler(
             num_train_timesteps=args.ddpm_num_steps,
             beta_schedule=args.ddpm_beta_schedule,
@@ -729,6 +766,18 @@ def main(args):
                 )
 
                 pipeline.save_pretrained(args.output_dir)
+
+                if args.perflow_save_delta and base_unet_state is not None:
+                    delta_weights = OrderedDict()
+                    trained_state = unet.state_dict()
+                    for key in trained_state.keys():
+                        delta_weights[key] = trained_state[key].detach().cpu() - base_unet_state[key]
+
+                    delta_output_path = args.perflow_delta_output or os.path.join(
+                        args.output_dir, "delta_weights.safetensors"
+                    )
+                    save_file(delta_weights, delta_output_path)
+                    logger.info(f"Saved delta weights to {delta_output_path}")
 
                 if args.use_ema:
                     ema_model.restore(unet.parameters())

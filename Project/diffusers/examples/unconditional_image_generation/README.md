@@ -162,4 +162,32 @@ dataset.push_to_hub("name_of_your_dataset", private=True)
 
 and that's it! You can now train your model by simply setting the `--dataset_name` argument to the name of your dataset on the hub.
 
+### PeRFlow delta training and inference
+
+1. Finetune from a pretrained unconditional model and save delta weights for PeRFlow:
+
+```bash
+accelerate launch train_unconditional.py \
+  --dataset_name="huggan/flowers-102-categories" \
+  --pretrained_model_path="anton-l/ddpm-ema-flowers-64" \
+  --perflow_save_delta \
+  --output_dir="perflow-flowers-64" \
+  --num_epochs=5 --train_batch_size=16 --ddpm_num_steps=1000
+```
+
+The finetune stores `delta_weights.safetensors` alongside the checkpoint (difference between tuned UNet and the base model).
+
+2. Benchmark PeRFlow accelerated inference (fewer steps) vs the baseline scheduler:
+
+```bash
+python perflow_inference.py \
+  --base_model_path perflow-flowers-64 \
+  --delta_weights perflow-flowers-64/delta_weights.safetensors \
+  --num_steps_base 50 --num_steps_perflow 8 \
+  --num_images 4 --seed 0 --device cuda \
+  --output_dir perflow_samples
+```
+
+The script reports wall-clock time and speedup and optionally saves comparison images.
+
 More on this can also be found in [this blog post](https://huggingface.co/blog/image-search-datasets).
