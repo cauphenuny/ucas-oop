@@ -22,7 +22,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 
 import diffusers
-from diffusers import DDPMPipeline, DDPMScheduler, UNet2DModel
+from diffusers import DDPMPipeline, DDPMScheduler, PeRFlowScheduler, UNet2DModel
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_accelerate_version, is_tensorboard_available, is_wandb_available
@@ -257,7 +257,24 @@ def parse_args():
         type=str,
         default="epsilon",
         choices=["epsilon", "sample"],
-        help="Whether the model should predict the 'epsilon'/noise error or directly the reconstructed image 'x0'.",
+        help="Prediction type when using the DDPM scheduler (noise or x0).",
+    )
+    parser.add_argument(
+        "--scheduler_type",
+        type=str,
+        default="ddpm",
+        choices=["ddpm", "perflow"],
+        help="Training scheduler. Use 'perflow' to train with PeRFlowScheduler and fewer sampling steps.",
+    )
+    parser.add_argument(
+        "--perflow_prediction_type",
+        type=str,
+        default="ddim_eps",
+        choices=["ddim_eps", "diff_eps"],
+        help=(
+            "Prediction type for PeRFlowScheduler. Both options use noise as target; velocity is intentionally"
+            " not exposed to keep training objective aligned."
+        ),
     )
     parser.add_argument("--ddpm_num_steps", type=int, default=1000)
     parser.add_argument("--ddpm_num_inference_steps", type=int, default=1000)
@@ -473,7 +490,15 @@ def main(args):
 
     # Initialize the scheduler
     accepts_prediction_type = "prediction_type" in set(inspect.signature(DDPMScheduler.__init__).parameters.keys())
-    if pipeline_scheduler is not None:
+
+    if args.scheduler_type == "perflow":
+        # Always build a fresh PeRFlow scheduler to avoid mismatches with the pretrained pipeline scheduler
+        noise_scheduler = PeRFlowScheduler(
+            num_train_timesteps=args.ddpm_num_steps,
+            beta_schedule=args.ddpm_beta_schedule,
+            prediction_type=args.perflow_prediction_type,
+        )
+    elif pipeline_scheduler is not None:
         noise_scheduler = pipeline_scheduler
         if accepts_prediction_type:
             noise_scheduler.config.prediction_type = args.prediction_type
@@ -647,7 +672,10 @@ def main(args):
                 # Predict the noise residual
                 model_output = model(noisy_images, timesteps).sample
 
-                if args.prediction_type == "epsilon":
+                if args.scheduler_type == "perflow":
+                    # For PeRFlow we train on noise targets (ddim_eps or diff_eps) to match the sampler expectation
+                    loss = F.mse_loss(model_output.float(), noise.float())
+                elif args.prediction_type == "epsilon":
                     loss = F.mse_loss(model_output.float(), noise.float())  # this could have different weights!
                 elif args.prediction_type == "sample":
                     alpha_t = _extract_into_tensor(
@@ -732,7 +760,7 @@ def main(args):
                 inference_device = "cpu"
                 if torch.cuda.is_available() and str(pipeline.device) != "mps":
                     inference_device = pipeline.device
-                
+
                 pipeline = pipeline.to(inference_device)
                 generator = torch.Generator(device=inference_device).manual_seed(0)
                 # run pipeline in inference (sample random noise and denoise)

@@ -164,18 +164,20 @@ and that's it! You can now train your model by simply setting the `--dataset_nam
 
 ### PeRFlow delta training and inference
 
-1. Finetune from a pretrained unconditional model and save delta weights for PeRFlow:
+1. Train with the PeRFlow scheduler so the UNet matches the accelerated sampler (note the new flags):
 
 ```bash
 accelerate launch train_unconditional.py \
   --dataset_name="huggan/flowers-102-categories" \
   --pretrained_model_path="anton-l/ddpm-ema-flowers-64" \
+  --scheduler_type perflow \
+  --perflow_prediction_type ddim_eps \
   --perflow_save_delta \
   --output_dir="perflow-flowers-64" \
   --num_epochs=5 --train_batch_size=16 --ddpm_num_steps=1000
 ```
 
-The finetune stores `delta_weights.safetensors` alongside the checkpoint (difference between tuned UNet and the base model).
+This stores `delta_weights.safetensors` (trained minus base UNet) next to the checkpoint.
 
 2. Benchmark PeRFlow accelerated inference (fewer steps) vs the baseline scheduler:
 
@@ -188,6 +190,6 @@ python perflow_inference.py \
   --output_dir perflow_samples
 ```
 
-The script reports wall-clock time and speedup and optionally saves comparison images.
+The script reports wall-clock time and speedup and optionally saves comparison images. For non-PeRFlow-trained weights, stick to the baseline scheduler to avoid quality loss.
 
 More on this can also be found in [this blog post](https://huggingface.co/blog/image-search-datasets).
