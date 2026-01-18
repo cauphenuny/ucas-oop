@@ -78,10 +78,10 @@ def main():
     load_delta_weights_into_unet(perflow_pipe, model_path=args.delta_weights, base_path=args.base_model_path)
 
     # Build a PeRFlow scheduler; map common prediction types to supported ones
-    perflow_cfg = perflow_pipe.scheduler.config
-    pred_type = getattr(perflow_cfg, "prediction_type", None)
+    perflow_cfg = dict(perflow_pipe.scheduler.config)
+    pred_type = perflow_cfg.get("prediction_type")
     if pred_type in ("epsilon", "sample"):
-        perflow_cfg.prediction_type = "ddim_eps"
+        perflow_cfg["prediction_type"] = "ddim_eps"
     perflow_pipe.scheduler = PeRFlowScheduler.from_config(perflow_cfg)
     if device is not None:
         perflow_pipe = perflow_pipe.to(device)
