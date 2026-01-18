@@ -46,8 +46,15 @@ def test_perflow_step_parity():
         sample = samples[idx]
         model_output = model_outputs[idx]
 
-        diff_out = diffusers_scheduler.step(model_output, int(timestep.item()), sample, return_dict=False)[0]
-        orig_out = original_scheduler.step(model_output, int(timestep.item()), sample, return_dict=False)[0]
+        # Use tensor timesteps to mirror original implementation expectations and avoid float casting.
+        step_timestep = timestep
+
+        diff_out = diffusers_scheduler.step(
+            model_output, step_timestep, sample, return_dict=False
+        )[0]
+        orig_out = original_scheduler.step(
+            model_output, step_timestep, sample, return_dict=False
+        )[0]
 
         torch.testing.assert_close(diff_out, orig_out, rtol=1e-6, atol=1e-7)
 
