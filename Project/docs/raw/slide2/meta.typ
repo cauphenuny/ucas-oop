@@ -4,8 +4,8 @@
 
 #let meta = (
   title: [大作业报告],
-  slide-title: [Diffusers重构与扩展],
-  subtitle: [],
+  slide-title: [Diffusers @diffusers 重构与扩展],
+  subtitle: [Diffusers @diffusers 重构与扩展],
   author: [袁晨圃],
   course: [OOP],
   repo: [https://github.com/hugging-face/diffusers],
