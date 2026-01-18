@@ -79,41 +79,51 @@ def load_delta_weights_into_unet(
         The pipeline with updated UNet weights.
     """
     # Load delta_weights
-    if os.path.exists(os.path.join(model_path, "delta_weights.safetensors")):
+    delta_file = None
+    # Accept both a directory (containing delta_weights.safetensors) and a direct file path
+    if os.path.isfile(model_path) and model_path.endswith(".safetensors"):
+        delta_file = model_path
+    elif os.path.exists(os.path.join(model_path, "delta_weights.safetensors")):
+        delta_file = os.path.join(model_path, "delta_weights.safetensors")
+
+    if delta_file is not None:
         logger.info("Delta weights exist, loading...")
         delta_weights = OrderedDict()
-        with safe_open(os.path.join(model_path, "delta_weights.safetensors"), framework="pt", device="cpu") as f:
+        with safe_open(delta_file, framework="pt", device="cpu") as f:
             for key in f.keys():
                 delta_weights[key] = f.get_tensor(key)
-                
+
     elif os.path.exists(os.path.join(model_path, "diffusion_pytorch_model.safetensors")):
         logger.info("Merged weights exist, loading...")
         merged_weights = OrderedDict()
         with safe_open(os.path.join(model_path, "diffusion_pytorch_model.safetensors"), framework="pt", device="cpu") as f:
             for key in f.keys():
                 merged_weights[key] = f.get_tensor(key)
-        
+
         # Import here to avoid circular dependency
         # Load only UNet to reduce memory usage
         from ..models import UNet2DConditionModel
+
         base_unet = UNet2DConditionModel.from_pretrained(
             base_path, subfolder="unet", torch_dtype=torch.float16
         )
         base_weights = base_unet.state_dict()
-        
+
         if base_weights.keys() != merged_weights.keys():
             raise ValueError("Base weights and merged weights have mismatched keys")
-        
+
         delta_weights = OrderedDict()
         for key in merged_weights.keys():
-            delta_weights[key] = merged_weights[key] - base_weights[key].to(device=merged_weights[key].device, dtype=merged_weights[key].dtype)
-        
+            delta_weights[key] = merged_weights[key] - base_weights[key].to(
+                device=merged_weights[key].device, dtype=merged_weights[key].dtype
+            )
+
         logger.info("Saving delta weights...")
         save_file(delta_weights, os.path.join(model_path, "delta_weights.safetensors"))
-        
+
     else:
         raise ValueError(f"{model_path} does not contain delta weights or merged weights")
-        
+
     # Merge delta_weights to the target pipeline
     pipe = merge_delta_weights_into_unet(pipe, delta_weights)
     return pipe

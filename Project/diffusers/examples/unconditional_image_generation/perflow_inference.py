@@ -19,7 +19,12 @@ from PIL import Image
 def parse_args():
     parser = argparse.ArgumentParser(description="Benchmark PeRFlow accelerated inference for unconditional generation.")
     parser.add_argument("--base_model_path", type=str, required=True, help="Path or repo id of the baseline DDPMPipeline.")
-    parser.add_argument("--delta_weights", type=str, required=True, help="Path to delta_weights.safetensors produced after finetuning.")
+    parser.add_argument(
+        "--delta_weights",
+        type=str,
+        required=True,
+        help="Path to delta_weights.safetensors or a directory containing it (from finetuning).",
+    )
     parser.add_argument("--num_images", type=int, default=4, help="Batch size / number of images to generate.")
     parser.add_argument("--num_steps_base", type=int, default=50, help="Number of inference steps for the baseline scheduler.")
     parser.add_argument("--num_steps_perflow", type=int, default=8, help="Number of inference steps for the PeRFlow scheduler.")
